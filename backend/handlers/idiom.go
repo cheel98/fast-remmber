@@ -2,8 +2,9 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
-	
+
 	"fast-remmber-backend/database"
 	"fast-remmber-backend/models"
 	"fast-remmber-backend/services"
@@ -87,6 +88,17 @@ func SaveIdiom(c *gin.Context) {
 		return
 	}
 
+	examples := body.Examples
+	if examples == nil {
+		examples = []models.UsageExample{}
+	}
+
+	examplesJSON, err := json.Marshal(examples)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to serialize examples: " + err.Error()})
+		return
+	}
+
 	if database.Driver != nil {
 		ctx := context.Background()
 		session := database.Driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
@@ -95,8 +107,8 @@ func SaveIdiom(c *gin.Context) {
 		_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 			// Create main idiom node
 			_, err := tx.Run(ctx,
-				"MERGE (i:Idiom {name: $name}) SET i.meaning = $meaning, i.emotions = $emotions",
-				map[string]any{"name": body.Idiom, "meaning": body.Meaning, "emotions": body.Emotions})
+				"MERGE (i:Idiom {name: $name}) SET i.meaning = $meaning, i.emotions = $emotions, i.examples = $examples",
+				map[string]any{"name": body.Idiom, "meaning": body.Meaning, "emotions": body.Emotions, "examples": string(examplesJSON)})
 			if err != nil {
 				return nil, err
 			}
@@ -168,7 +180,7 @@ func GetIdiomGraph(c *gin.Context) {
 			Nodes: []models.GraphNode{},
 			Links: []models.GraphLink{},
 		}
-		
+
 		nodeMap := make(map[string]*models.GraphNode)
 
 		for res.Next(ctx) {
@@ -258,7 +270,7 @@ func GetIdiomDetail(c *gin.Context) {
 	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		// Fetch idiom properties
 		res, err := tx.Run(ctx,
-			"MATCH (i:Idiom {name: $name}) RETURN i.meaning AS meaning, i.emotions AS emotions",
+			"MATCH (i:Idiom {name: $name}) RETURN i.meaning AS meaning, i.emotions AS emotions, i.examples AS examples",
 			map[string]any{"name": name})
 		if err != nil {
 			return nil, err
@@ -271,13 +283,15 @@ func GetIdiomDetail(c *gin.Context) {
 		record := res.Record()
 		meaning, _ := record.Get("meaning")
 		emotions, _ := record.Get("emotions")
+		examples, _ := record.Get("examples")
 
 		idiomRes := models.IdiomExtractionResult{
-			Idiom:    name,
-			Meaning:  "",
-			Emotions: "",
+			Idiom:        name,
+			Meaning:      "",
+			Emotions:     "",
 			Synonyms:     []models.RelationshipDetail{},
 			Antonyms:     []models.RelationshipDetail{},
+			Examples:     []models.UsageExample{},
 			HasAIExplore: meaning != nil, // Only considered explored if it has a meaning
 		}
 
@@ -286,6 +300,22 @@ func GetIdiomDetail(c *gin.Context) {
 		}
 		if emotions != nil {
 			idiomRes.Emotions = emotions.(string)
+		}
+		if examples != nil {
+			switch value := examples.(type) {
+			case string:
+				if value != "" && value != "null" {
+					if err := json.Unmarshal([]byte(value), &idiomRes.Examples); err != nil {
+						return nil, err
+					}
+				}
+			case []byte:
+				if len(value) > 0 && string(value) != "null" {
+					if err := json.Unmarshal(value, &idiomRes.Examples); err != nil {
+						return nil, err
+					}
+				}
+			}
 		}
 
 		// Fetch Synonyms
@@ -337,6 +367,11 @@ func GetIdiomDetail(c *gin.Context) {
 		return
 	}
 
+	if idiomRes, ok := result.(models.IdiomExtractionResult); ok {
+		idiomRes.Examples = services.EnsureAuthoritativeExamples(c.Request.Context(), idiomRes.Idiom, idiomRes.Examples)
+		result = idiomRes
+	}
+
 	c.JSON(http.StatusOK, result)
 }
 
@@ -350,7 +385,7 @@ func AssociateIdioms(c *gin.Context) {
 	if req.Label == "" {
 		req.Label = "RELATED"
 	}
-	
+
 	// Basic validation for relationship label to prevent Cypher injection
 	allowedLabels := map[string]bool{
 		"SYNONYM": true,

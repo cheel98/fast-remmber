@@ -19,6 +19,26 @@ interface IdiomGraphProps {
   onSaveSuccess?: () => void;
 }
 
+const GRAPH_LAYOUT = {
+  largeNodeRadius: 16.5,
+  smallNodeRadius: 10.5,
+  linkGap: 10,
+  linkStrength: 0.55,
+  chargeStrength: -260,
+  breathingAmplitude: 0.5,
+  glowPadding: 4,
+  glowSpread: 6,
+  pointerRadiusInset: 0.5,
+} as const;
+
+const getNodeBaseRadius = (node?: { hasMeaning?: boolean } | null) =>
+  node?.hasMeaning ? GRAPH_LAYOUT.largeNodeRadius : GRAPH_LAYOUT.smallNodeRadius;
+
+const getLinkDistance = (
+  source?: { hasMeaning?: boolean } | null,
+  target?: { hasMeaning?: boolean } | null,
+) => getNodeBaseRadius(source) + getNodeBaseRadius(target) + GRAPH_LAYOUT.linkGap;
+
 export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess }: IdiomGraphProps) {
   const t = useTranslations('IdiomGraph');
   const { theme } = useTheme();
@@ -262,27 +282,24 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess }: I
   };
 
   useEffect(() => {
-    // Set force configuration after graph loads to increase spacing
+    // Tune the force configuration after graph data changes.
     const timer = setTimeout(() => {
       if (fgRef.current) {
-        // Dynamic link distance based on 4-tier strength
+        const nodeById = new Map(data.nodes.map(node => [node.id, node]));
+        const resolveLinkNode = (nodeRef: any) =>
+          typeof nodeRef === 'object' ? nodeRef : nodeById.get(nodeRef);
         fgRef.current.d3Force('link')?.distance((link: any) => {
-          const s = link.strength || 0.5;
-          const source = typeof link.source === 'object' ? link.source : data.nodes.find(n => n.id === link.source);
-          const target = typeof link.target === 'object' ? link.target : data.nodes.find(n => n.id === link.target);
+          const source = resolveLinkNode(link.source);
+          const target = resolveLinkNode(link.target);
           
-          // 获取两个节点的半径（基于其是否释义）
-          const rSource = source?.hasMeaning ? 16.5 : 10.5;
-          const rTarget = target?.hasMeaning ? 16.5 : 10.5;
-          
-          // 连线距离 = 半径之和 + 基于强度的额外间隙
-          // Multiplier 设为 80，在强度为 0.5 时产生 20 的额外间隙
-          const gapMultiplier = 80;
-          return (rSource + rTarget) + gapMultiplier * Math.pow(1 - s, 2);
+          // Link distance is managed centrally and only varies with node size.
+          return getLinkDistance(source, target);
         });
 
-        // Adjusted repulsion to prevent fighting with tight links
-        fgRef.current.d3Force('charge')?.strength(-300);
+        // Keep the layout forces centralized as well.
+        fgRef.current.d3Force('link')?.strength(() => GRAPH_LAYOUT.linkStrength);
+
+        fgRef.current.d3Force('charge')?.strength(GRAPH_LAYOUT.chargeStrength);
         // Reheat simulation so changes take effect
         fgRef.current.d3ReheatSimulation?.();
       }
@@ -344,10 +361,8 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess }: I
           const label = node.label || '';
           const time = Date.now() / 1000;
 
-          // Base radius based on whether the idiom is explained
-          const baseRadius = node.hasMeaning ? 16.5 : 10.5;
-          // Breathing radius
-          const r = baseRadius + Math.sin(time * 2) * 0.5;
+          const baseRadius = getNodeBaseRadius(node);
+          const r = baseRadius + Math.sin(time * 2) * GRAPH_LAYOUT.breathingAmplitude;
 
           // Highlight logic
           const isHighlighted = highlightNodes.has(node.id);
@@ -369,8 +384,8 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess }: I
 
           // Outer glow for breathing effect
           ctx.beginPath();
-          ctx.arc(node.x, node.y, r + 4, 0, 2 * Math.PI, false);
-          const gradient = ctx.createRadialGradient(node.x, node.y, r, node.x, node.y, r + 6);
+          ctx.arc(node.x, node.y, r + GRAPH_LAYOUT.glowPadding, 0, 2 * Math.PI, false);
+          const gradient = ctx.createRadialGradient(node.x, node.y, r, node.x, node.y, r + GRAPH_LAYOUT.glowSpread);
           gradient.addColorStop(0, `${nodeColor}44`);
           gradient.addColorStop(1, 'transparent');
           ctx.fillStyle = gradient;
@@ -456,7 +471,7 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess }: I
           }
           ctx.fillStyle = color;
           ctx.beginPath();
-          const r = node.hasMeaning ? 16 : 10;
+          const r = getNodeBaseRadius(node) - GRAPH_LAYOUT.pointerRadiusInset;
           ctx.arc(node.x, node.y, r, 0, 2 * Math.PI, false);
           ctx.fill();
         }}

@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useEffect, useState } from 'react';
-import { X, BookOpen, Quote, TrendingUp, TrendingDown, Activity, Smile, Frown, Meh } from 'lucide-react';
+import { X, BookOpen, TrendingUp, TrendingDown, Activity, Smile, Frown, Meh } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { IdiomResult, fetchIdiomDetail } from '@/lib/api';
+import UsageExamples from '@/components/UsageExamples';
 import { cn } from '@/lib/utils';
 
 interface NodeDetailCardProps {
@@ -94,11 +95,13 @@ export default function NodeDetailCard({ idiomName, x, y, onClose, isHover }: No
         {/* Meaning */}
         <div className="space-y-1.5">
           <div className="flex items-center gap-1.5">
-            <Quote className="h-3 w-3 text-muted-foreground" />
+            <BookOpen className="h-3 w-3 text-muted-foreground" />
             <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">{t('meaning')}</span>
           </div>
           <p className="text-xs leading-relaxed text-foreground/90">{data.meaning || t('noMeaning')}</p>
         </div>
+
+        <UsageExamples examples={data.examples} compact />
 
         {/* Sentiment */}
         <div className="flex items-center justify-between py-2 border-y border-border/30">

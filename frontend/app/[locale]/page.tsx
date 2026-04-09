@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 import IdiomGraph from '@/components/IdiomGraph';
 import LanguageSwitcher from '@/components/LanguageSwitcher';
 import { SkinToggle } from '@/components/skin-toggle';
+import UsageExamples from '@/components/UsageExamples';
 import { analyzeIdiom, saveIdiom, IdiomResult, fetchIdiomDetail, deleteIdiom } from '@/lib/api';
 
 export default function Home() {
@@ -389,6 +390,8 @@ export default function Home() {
                               />
                             )}
                           </div>
+
+                          <UsageExamples examples={analysisResult.examples} />
                           
                           {analysisResult.synonyms && analysisResult.synonyms.length > 0 && (
                             <div>
@@ -599,6 +602,8 @@ export default function Home() {
                             />
                           )}
                         </div>
+
+                        <UsageExamples examples={inspectorResult.examples} />
                         
                         {inspectorResult.synonyms && inspectorResult.synonyms.length > 0 && (
                           <div>

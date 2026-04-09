@@ -6,11 +6,19 @@ export interface RelationshipDetail {
   hasAIExplore?: boolean;
 }
 
+export interface UsageExample {
+  usage: string;
+  sentence: string;
+  source: string;
+  sourceUrl: string;
+}
+
 export interface IdiomResult {
   idiom: string;
   meaning: string;
   synonyms: RelationshipDetail[];
   antonyms: RelationshipDetail[];
+  examples?: UsageExample[];
   emotions: string;
   hasAIExplore?: boolean;
 }

@@ -6,11 +6,19 @@ type RelationshipDetail struct {
 	HasAIExplore bool    `json:"hasAIExplore"`
 }
 
+type UsageExample struct {
+	Usage     string `json:"usage"`
+	Sentence  string `json:"sentence"`
+	Source    string `json:"source"`
+	SourceURL string `json:"sourceUrl"`
+}
+
 type IdiomExtractionResult struct {
 	Idiom        string               `json:"idiom"`
 	Meaning      string               `json:"meaning"`
 	Synonyms     []RelationshipDetail `json:"synonyms"`
 	Antonyms     []RelationshipDetail `json:"antonyms"`
+	Examples     []UsageExample       `json:"examples"`
 	Emotions     string               `json:"emotions"`
 	HasAIExplore bool                 `json:"hasAIExplore"`
 }
