@@ -1,0 +1,100 @@
+{
+  "HomePage": {
+    "title": "成语语义神经网络",
+    "subtitle": "探索成语之间深邃的语义关联",
+    "discovery": "探索分析",
+    "inspector": "节点详情",
+    "searchPlaceholder": "输入成语 (例如: 守株待兔)",
+    "extractedData": "语义数据分析",
+    "aiExplore": "AI 探索",
+    "sentiment": "情感倾向",
+    "meaning": "释义",
+    "synonyms": "同义词",
+    "antonyms": "反义词",
+    "writingToGraph": "已写入图谱 (Saved!)",
+    "confirmWrite": "确认写入图谱 (Confirm & Write)",
+    "saveSuccess": "成语已成功添加至关系网",
+    "noResult": "还没有分析结果。尝试搜索一个成语或点击图谱中的“AI探索”！",
+    "clickNode": "点击或悬停图谱中的节点来查看详细信息。",
+    "loadingDetails": "正在加载详情...",
+    "notFound": "成语未在数据库中找到",
+    "noMeaning": "暂无释义",
+    "collapse": "折叠侧边栏",
+    "expand": "展开侧边栏",
+    "deleteConfirm": "确定要从数据库和关系网中删除成语“{idiom}”吗？",
+    "deleteSuccess": "成语已删除",
+    "deleteError": "删除失败",
+    "saveError": "保存失败"
+  },
+  "IdiomGraph": {
+    "loading": "图谱加载中...",
+    "noData": "当前网络中暂无成语。试着搜索一个吧！",
+    "zoomIn": "放大",
+    "zoomOut": "缩小",
+    "zoomToFit": "适应屏幕",
+    "menu": {
+      "unlock": "🔓 解锁节点",
+      "pin": "📌 固定节点",
+      "details": "📖 查看详情",
+      "aiExpand": "🚀 智能扩展",
+      "customExpand": "🛠️ 自定义扩展",
+      "connect": "🔗 建立联系",
+      "relManagement": "关系管理",
+      "editRel": "⚙️ 编辑关系",
+      "reverseRel": "🔄 反转方向",
+      "deleteRel": "🗑️ 删除关系"
+    },
+    "labels": {
+      "synonym": "同义",
+      "antonym": "反义",
+      "related": "相关",
+      "analogy": "类比",
+      "strength": "强度"
+    }
+  },
+  "RelationshipModal": {
+    "editTitle": "编辑关系",
+    "createTitle": "手动建立关系",
+    "descriptionEdit": "修改 {sourceId} 和 {targetId} 之间的语义联系。",
+    "descriptionCreate": "为 {sourceId} 和 {targetId} 建立语义联系。",
+    "type": "关系类型",
+    "selectPlaceholder": "选择关系类型",
+    "strength": "强度",
+    "strengthDesc": "* 强度决定图中连线的粗细和颜色深浅。",
+    "saving": "保存中..."
+  },
+  "CustomExpandModal": {
+    "title": "自定义关联扩展",
+    "startIdiom": "起始成语",
+    "targetIdiom": "目标成语",
+    "targetPlaceholder": "输入目标成语",
+    "relType": "关系类型",
+    "synonym": "近义词 (Synonym)",
+    "antonym": "反义词 (Antonym)",
+    "sentiment": "标注词性 (感情色彩)",
+    "pos": "褒义",
+    "neg": "贬义",
+    "neu": "中性",
+    "confidence": "关联强度 (Confidence)",
+    "meaningLabel": "词义解释 (Meaning)",
+    "meaningPlaceholder": "请输入成语的详细解释...",
+    "errorRequired": "名称与释义为必填项",
+    "errorSave": "保存失败，请检查连接",
+    "saving": "正在保存连接...",
+    "submit": "确认并建立连接"
+  },
+  "Common": {
+    "confirm": "确定",
+    "cancel": "取消",
+    "save": "保存",
+    "delete": "删除",
+    "loading": "处理中..."
+  },
+  "Skins": {
+    "title": "更换皮肤",
+    "dark": "深邃暗夜 (Dark)",
+    "light-snow": "极简雪白 (Snow)",
+    "light-slate": "科技冷灰 (Slate)",
+    "light-lavender": "神经薰衣草 (Lavender)"
+  }
+}

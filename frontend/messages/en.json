@@ -1,0 +1,102 @@
+{
+  "HomePage": {
+    "title": "Semantic Idiom Network",
+    "subtitle": "Discover the profound relationships in idioms",
+    "discovery": "Discovery",
+    "inspector": "Inspector",
+    "searchPlaceholder": "Enter an idiom (e.g. 守株待兔)",
+    "extractedData": "Semantic Data Analysis",
+    "aiExplore": "AI Explore",
+    "sentiment": "Sentiment",
+    "meaning": "Meaning",
+    "synonyms": "Synonyms",
+    "antonyms": "Antonyms",
+    "writingToGraph": "Saved!",
+    "confirmWrite": "Confirm & Write",
+    "saveSuccess": "Idiom successfully added to the network",
+    "noResult": "No analysis results yet. Try searching an idiom or clicking 'AI Explore' in the graph!",
+    "clickNode": "Click or hover on a node in the graph to see details.",
+    "loadingDetails": "Loading details...",
+    "notFound": "Idiom not found in database",
+    "noMeaning": "No meaning available",
+    "collapse": "Collapse Sidebar",
+    "expand": "Expand Sidebar",
+    "deleteConfirm": "Are you sure you want to delete the idiom \"{idiom}\" from the database and graph?",
+    "deleteSuccess": "Idiom deleted",
+    "deleteError": "Deletion failed",
+    "saveError": "Save failed",
+    "loading": "Loading...",
+    "error": "An error occurred"
+  },
+  "IdiomGraph": {
+    "loading": "Loading Graph...",
+    "noData": "No idioms in the network yet. Try searching one!",
+    "zoomIn": "Zoom In",
+    "zoomOut": "Zoom Out",
+    "zoomToFit": "Zoom to Fit",
+    "menu": {
+      "unlock": "🔓 Unlock Node",
+      "pin": "📌 Pin Node",
+      "details": "📖 View Details",
+      "aiExpand": "🚀 AI Expand",
+      "customExpand": "🛠️ Custom Expand",
+      "connect": "🔗 Connect",
+      "relManagement": "Relationship Management",
+      "editRel": "⚙️ Edit Relationship",
+      "reverseRel": "🔄 Reverse Direction",
+      "deleteRel": "🗑️ Delete Relationship"
+    },
+    "labels": {
+      "synonym": "Synonym",
+      "antonym": "Antonym",
+      "related": "Related",
+      "analogy": "Analogy",
+      "strength": "Strength"
+    }
+  },
+  "RelationshipModal": {
+    "editTitle": "Edit Relationship",
+    "createTitle": "Create Relationship",
+    "descriptionEdit": "Modify semantic connection between {sourceId} and {targetId}.",
+    "descriptionCreate": "Create semantic connection for {sourceId} and {targetId}.",
+    "type": "Relationship Type",
+    "selectPlaceholder": "Select relationship type",
+    "strength": "Strength",
+    "strengthDesc": "* Strength determines the thickness and color depth of lines in the graph.",
+    "saving": "Saving..."
+  },
+  "CustomExpandModal": {
+    "title": "Custom Relation Expand",
+    "startIdiom": "Source Idiom",
+    "targetIdiom": "Target Idiom",
+    "targetPlaceholder": "Enter target idiom",
+    "relType": "Relation Type",
+    "synonym": "Synonym",
+    "antonym": "Antonym",
+    "sentiment": "Specify POS (Sentiment)",
+    "pos": "Positive",
+    "neg": "Negative",
+    "neu": "Neutral",
+    "confidence": "Confidence",
+    "meaningLabel": "Meaning",
+    "meaningPlaceholder": "Enter detailed meaning...",
+    "errorRequired": "Name and meaning are required",
+    "errorSave": "Save failed, please check connection",
+    "saving": "Saving connection...",
+    "submit": "Confirm & Connect"
+  },
+  "Common": {
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "loading": "Processing..."
+  },
+  "Skins": {
+    "title": "Change Skin",
+    "dark": "Deep Dark",
+    "light-snow": "Snow White",
+    "light-slate": "Slate Grey",
+    "light-lavender": "Neural Lavender"
+  }
+}
