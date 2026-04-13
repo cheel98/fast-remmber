@@ -17,6 +17,7 @@ interface IdiomGraphProps {
   onExpand?: (term: string) => void;
   onShowDetails?: (term: string) => void;
   onSaveSuccess?: () => void;
+  isAuthenticated?: boolean;
 }
 
 const GRAPH_LAYOUT = {
@@ -39,7 +40,7 @@ const getLinkDistance = (
   target?: { hasMeaning?: boolean } | null,
 ) => getNodeBaseRadius(source) + getNodeBaseRadius(target) + GRAPH_LAYOUT.linkGap;
 
-export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess }: IdiomGraphProps) {
+export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess, isAuthenticated = false }: IdiomGraphProps) {
   const t = useTranslations('IdiomGraph');
   const { theme } = useTheme();
   const isLight = theme && theme.startsWith('light');
@@ -309,6 +310,13 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess }: I
   }, [data]);
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      setData({ nodes: [], links: [] });
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
     fetchGraph()
       .then((res) => {
         setData(res);
@@ -318,10 +326,14 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess }: I
         console.error('Failed to load graph data:', err);
         setLoading(false);
       });
-  }, []);
+  }, [isAuthenticated]);
 
   if (loading) {
     return <div className="w-full h-full flex items-center justify-center text-muted-foreground border rounded-xl bg-muted/20">{t('loading')}</div>;
+  }
+
+  if (!isAuthenticated) {
+    return <div className="w-full h-full flex items-center justify-center text-muted-foreground border rounded-xl bg-muted/20">{t('loginRequired')}</div>;
   }
 
   if (data.nodes.length === 0) {

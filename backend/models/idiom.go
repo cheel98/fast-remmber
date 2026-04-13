@@ -7,6 +7,7 @@ type RelationshipDetail struct {
 }
 
 type UsageExample struct {
+	Title     string `json:"title"`
 	Usage     string `json:"usage"`
 	Sentence  string `json:"sentence"`
 	Source    string `json:"source"`

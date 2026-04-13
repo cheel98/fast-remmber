@@ -38,13 +38,13 @@ type peopleSearchRecord struct {
 	BelongsName     string `json:"belongsName"`
 }
 
-func EnsureAuthoritativeExamples(ctx context.Context, idiom string, current []models.UsageExample) []models.UsageExample {
-	normalized := normalizeUsageExamples(current)
+func EnsureAuthoritativeExamples(ctx context.Context, idiom string, meaning string, current []models.UsageExample) []models.UsageExample {
+	normalized := upgradeUsageExamples(normalizeUsageExamples(current), meaning)
 	if len(normalized) >= 2 || strings.TrimSpace(idiom) == "" {
 		return normalized
 	}
 
-	fetched := fetchPeopleAuthoritativeExamples(ctx, idiom, authoritativeExampleLimit)
+	fetched := fetchPeopleAuthoritativeExamples(ctx, idiom, meaning, authoritativeExampleLimit)
 	if len(fetched) == 0 {
 		return normalized
 	}
@@ -52,7 +52,7 @@ func EnsureAuthoritativeExamples(ctx context.Context, idiom string, current []mo
 	return mergeUsageExamples(normalized, fetched, authoritativeExampleLimit)
 }
 
-func fetchPeopleAuthoritativeExamples(ctx context.Context, idiom string, limit int) []models.UsageExample {
+func fetchPeopleAuthoritativeExamples(ctx context.Context, idiom string, meaning string, limit int) []models.UsageExample {
 	requestBody, err := json.Marshal(map[string]any{
 		"key": strings.TrimSpace(idiom),
 	})
@@ -111,7 +111,8 @@ func fetchPeopleAuthoritativeExamples(ctx context.Context, idiom string, limit i
 			continue
 		}
 
-		usage := buildUsageLabel(record)
+		title := buildExampleTitle(record)
+		usage := buildUsageDescription(record, meaning)
 		key := sentence + "|" + sourceURL
 		if _, exists := seen[key]; exists {
 			continue
@@ -119,6 +120,7 @@ func fetchPeopleAuthoritativeExamples(ctx context.Context, idiom string, limit i
 		seen[key] = struct{}{}
 
 		examples = append(examples, models.UsageExample{
+			Title:     title,
 			Usage:     usage,
 			Sentence:  sentence,
 			Source:    sourceName,
@@ -157,6 +159,52 @@ func mergeUsageExamples(existing []models.UsageExample, fetched []models.UsageEx
 	return merged
 }
 
+func upgradeUsageExamples(examples []models.UsageExample, meaning string) []models.UsageExample {
+	if len(examples) == 0 {
+		return examples
+	}
+
+	fallbackMeaning := strings.TrimSpace(meaning)
+	upgraded := make([]models.UsageExample, 0, len(examples))
+
+	for _, example := range examples {
+		title := strings.TrimSpace(example.Title)
+		usage := strings.TrimSpace(example.Usage)
+
+		if title == "" && shouldPromoteUsageToTitle(usage, fallbackMeaning) {
+			title = usage
+			usage = fallbackMeaning
+		}
+
+		upgraded = append(upgraded, models.UsageExample{
+			Title:     title,
+			Usage:     usage,
+			Sentence:  example.Sentence,
+			Source:    example.Source,
+			SourceURL: example.SourceURL,
+		})
+	}
+
+	return upgraded
+}
+
+func shouldPromoteUsageToTitle(usage string, meaning string) bool {
+	if usage == "" || meaning == "" || usage == meaning {
+		return false
+	}
+
+	meaningLikePrefixes := []string{
+		"用于", "用来", "比喻", "形容", "指", "表示", "常用来", "多用来", "多指", "此处",
+	}
+	for _, prefix := range meaningLikePrefixes {
+		if strings.HasPrefix(usage, prefix) {
+			return false
+		}
+	}
+
+	return true
+}
+
 func buildUsageLabel(record peopleSearchRecord) string {
 	title := truncateRunes(cleanExampleText(record.Title), 14)
 	if title != "" {
@@ -171,6 +219,44 @@ func buildUsageLabel(record peopleSearchRecord) string {
 	}
 
 	return "权威例句"
+}
+
+func buildExampleTitle(record peopleSearchRecord) string {
+	title := truncateRunes(cleanExampleText(record.Title), 14)
+	if title != "" {
+		return title
+	}
+
+	for _, part := range strings.Split(record.BelongsName, "#") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			return truncateRunes(part, 14)
+		}
+	}
+
+	return "权威例句"
+}
+
+func buildUsageDescription(record peopleSearchRecord, fallbackMeaning string) string {
+	fallbackMeaning = strings.TrimSpace(fallbackMeaning)
+	if fallbackMeaning != "" {
+		return truncateRunes(fallbackMeaning, 20)
+	}
+
+	title := cleanExampleText(record.Title)
+	title = strings.TrimSpace(strings.Trim(title, "“”\"'《》()（）[]【】"))
+	if title != "" {
+		return truncateRunes(title, 20)
+	}
+
+	for _, part := range strings.Split(record.BelongsName, "#") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			return truncateRunes(part, 20)
+		}
+	}
+
+	return "权威语境释义"
 }
 
 func extractSentenceContainingIdiom(rawText string, idiom string) string {

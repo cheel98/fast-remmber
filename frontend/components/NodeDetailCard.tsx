@@ -101,7 +101,7 @@ export default function NodeDetailCard({ idiomName, x, y, onClose, isHover }: No
           <p className="text-xs leading-relaxed text-foreground/90">{data.meaning || t('noMeaning')}</p>
         </div>
 
-        <UsageExamples examples={data.examples} compact />
+        <UsageExamples idiom={data.idiom} idiomMeaning={data.meaning} examples={data.examples} compact />
 
         {/* Sentiment */}
         <div className="flex items-center justify-between py-2 border-y border-border/30">

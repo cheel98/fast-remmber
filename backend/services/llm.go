@@ -133,7 +133,7 @@ func ExtractIdiomRelations(ctx context.Context, text string) (*models.IdiomExtra
 	if result.Antonyms == nil {
 		result.Antonyms = []models.RelationshipDetail{}
 	}
-	result.Examples = EnsureAuthoritativeExamples(ctx, result.Idiom, result.Examples)
+	result.Examples = EnsureAuthoritativeExamples(ctx, result.Idiom, result.Meaning, result.Examples)
 
 	return &result, nil
 }
@@ -166,6 +166,7 @@ func normalizeUsageExamples(examples []models.UsageExample) []models.UsageExampl
 		seen[key] = struct{}{}
 
 		normalized = append(normalized, models.UsageExample{
+			Title:     strings.TrimSpace(example.Title),
 			Usage:     usage,
 			Sentence:  sentence,
 			Source:    source,

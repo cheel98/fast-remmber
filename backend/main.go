@@ -2,7 +2,7 @@ package main
 
 import (
 	"log"
-	
+
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -27,18 +27,32 @@ func main() {
 	// Config CORS
 	config := cors.DefaultConfig()
 	config.AllowOrigins = []string{"*"} // Allow Next.js during dev, restrict in prod
+	config.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization"}
+	config.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
 	r.Use(cors.New(config))
 
 	// Routes
 	api := r.Group("/api")
 	{
-		api.POST("/analyze", handlers.AnalyzeIdiom)
-		api.POST("/save", handlers.SaveIdiom)
-		api.POST("/associate", handlers.AssociateIdioms)
-		api.POST("/dissociate", handlers.DissociateIdioms)
-		api.GET("/graph", handlers.GetIdiomGraph)
-		api.GET("/idiom/:name", handlers.GetIdiomDetail)
-		api.DELETE("/idiom/:name", handlers.DeleteIdiom)
+		auth := api.Group("/auth")
+		{
+			auth.POST("/register", handlers.RegisterUser)
+			auth.POST("/login", handlers.LoginUser)
+		}
+
+		protected := api.Group("")
+		protected.Use(handlers.AuthMiddleware())
+		{
+			protected.GET("/auth/me", handlers.GetCurrentUser)
+			protected.GET("/discoveries", handlers.ListDiscoveries)
+			protected.GET("/graph", handlers.GetIdiomGraph)
+			protected.GET("/idiom/:name", handlers.GetIdiomDetail)
+			protected.POST("/analyze", handlers.AnalyzeIdiom)
+			protected.POST("/save", handlers.SaveIdiom)
+			protected.POST("/associate", handlers.AssociateIdioms)
+			protected.POST("/dissociate", handlers.DissociateIdioms)
+			protected.DELETE("/idiom/:name", handlers.DeleteIdiom)
+		}
 	}
 
 	log.Println("Starting server on :8080")
