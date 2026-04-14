@@ -85,6 +85,7 @@ export default function Home() {
   const [isTopBarVisible, setIsTopBarVisible] = useState(true);
   const [isGraphPinned, setIsGraphPinned] = useState(false);
   const [graphPinnedHeight, setGraphPinnedHeight] = useState<number | null>(null);
+  const [graphPinnedTop, setGraphPinnedTop] = useState<number | null>(null);
   const [graphPinnedStyle, setGraphPinnedStyle] = useState<React.CSSProperties>({});
   const lastScrollYRef = useRef(0);
   const graphSectionRef = useRef<HTMLDivElement>(null);
@@ -214,7 +215,7 @@ export default function Home() {
       return;
     }
 
-    if (!isGraphPinned) {
+    if (!isGraphPinned || graphPinnedTop === null) {
       setGraphPinnedStyle({});
       return;
     }
@@ -230,9 +231,12 @@ export default function Home() {
         return;
       }
 
-      const topInset = window.innerWidth >= 1024 ? 92 : 76;
       const bottomInset = window.innerWidth >= 1024 ? 24 : 16;
-      const availableHeight = Math.max(220, window.innerHeight - topInset - bottomInset);
+      const top = Math.min(
+        Math.max(graphPinnedTop, 16),
+        Math.max(16, window.innerHeight - 220)
+      );
+      const availableHeight = Math.max(220, window.innerHeight - top - bottomInset);
       const measuredHeight =
         graphPinnedHeight ??
         graphViewportRef.current?.getBoundingClientRect().height ??
@@ -242,7 +246,7 @@ export default function Home() {
 
       setGraphPinnedStyle({
         position: 'fixed',
-        top: `${topInset}px`,
+        top: `${top}px`,
         left: `${rect.left}px`,
         width: `${rect.width}px`,
         height: `${height}px`,
@@ -259,7 +263,7 @@ export default function Home() {
       timeouts.forEach((timeoutId) => window.clearTimeout(timeoutId));
       window.removeEventListener('resize', updatePinnedGraphStyle);
     };
-  }, [isGraphPinned, graphPinnedHeight, isCollapsed]);
+  }, [isGraphPinned, graphPinnedHeight, graphPinnedTop, isCollapsed]);
 
   const ensureAuthenticated = () => {
     if (currentUser) {
@@ -513,12 +517,14 @@ export default function Home() {
     if (isGraphPinned) {
       setIsGraphPinned(false);
       setGraphPinnedHeight(null);
+      setGraphPinnedTop(null);
       setGraphPinnedStyle({});
       return;
     }
 
-    const currentHeight = graphViewportRef.current?.getBoundingClientRect().height;
-    setGraphPinnedHeight(currentHeight ? Math.round(currentHeight) : null);
+    const rect = graphViewportRef.current?.getBoundingClientRect();
+    setGraphPinnedHeight(rect?.height ? Math.round(rect.height) : null);
+    setGraphPinnedTop(rect ? Math.round(rect.top) : null);
     setIsGraphPinned(true);
   };
 
@@ -573,6 +579,20 @@ export default function Home() {
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={handleGraphPinToggle}
+            aria-pressed={isGraphPinned}
+            aria-label={isGraphPinned ? t('unpinGraph') : t('pinGraph')}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-full border border-border/60 bg-background/80 px-3 py-1.5 text-sm font-medium shadow-sm transition-colors hover:bg-muted",
+              isGraphPinned && "border-primary/40 text-primary"
+            )}
+            title={isGraphPinned ? t('unpinGraph') : t('pinGraph')}
+          >
+            {isGraphPinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
+            <span className="hidden md:inline">{isGraphPinned ? t('unpinGraph') : t('pinGraph')}</span>
+          </button>
           <SkinToggle />
           <LanguageSwitcher />
         </div>
@@ -1110,21 +1130,6 @@ export default function Home() {
               )}
               style={isGraphPinned ? graphPinnedStyle : undefined}
             >
-              <button
-                type="button"
-                onClick={handleGraphPinToggle}
-                aria-pressed={isGraphPinned}
-                aria-label={isGraphPinned ? t('unpinGraph') : t('pinGraph')}
-                className={cn(
-                  "absolute right-4 top-4 z-20 inline-flex items-center gap-2 rounded-full border border-border/60 bg-background/88 px-3 py-2 text-sm font-medium shadow-lg backdrop-blur transition-all hover:bg-muted",
-                  isGraphPinned && "border-primary/40 text-primary"
-                )}
-                title={isGraphPinned ? t('unpinGraph') : t('pinGraph')}
-              >
-                {isGraphPinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
-                <span>{isGraphPinned ? t('unpinGraph') : t('pinGraph')}</span>
-              </button>
-
               <IdiomGraph
                 key={`${currentUser?.id ?? 'guest'}-${graphKey}`}
                 isAuthenticated={Boolean(currentUser)}

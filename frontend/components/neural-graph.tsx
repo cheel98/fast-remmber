@@ -37,7 +37,7 @@ export function NeuralGraph({
 }: NeuralGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const animationRef = useRef<number>()
+  const animationRef = useRef<number | null>(null)
   const nodesRef = useRef<GraphNode[]>([])
   const edgesRef = useRef<GraphEdge[]>([])
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
@@ -307,7 +307,7 @@ export function NeuralGraph({
     render()
 
     return () => {
-      if (animationRef.current) {
+      if (animationRef.current !== null) {
         cancelAnimationFrame(animationRef.current)
       }
     }
