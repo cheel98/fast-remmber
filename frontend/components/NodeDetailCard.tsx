@@ -13,9 +13,19 @@ interface NodeDetailCardProps {
   y: number;
   onClose: () => void;
   isHover?: boolean;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
 }
 
-export default function NodeDetailCard({ idiomName, x, y, onClose, isHover }: NodeDetailCardProps) {
+export default function NodeDetailCard({
+  idiomName,
+  x,
+  y,
+  onClose,
+  isHover,
+  onMouseEnter,
+  onMouseLeave,
+}: NodeDetailCardProps) {
   const t = useTranslations('HomePage');
   const tCommon = useTranslations('Common');
   const [data, setData] = useState<IdiomResult | null>(null);
@@ -40,10 +50,12 @@ export default function NodeDetailCard({ idiomName, x, y, onClose, isHover }: No
       <div 
         className={cn(
           "absolute z-[60] bg-background/95 backdrop-blur-md border border-border shadow-2xl rounded-2xl p-4 w-64 animate-in fade-in zoom-in-95 duration-200",
-          !isHover && "pointer-events-auto",
-          isHover && "pointer-events-none"
+          "pointer-events-auto"
         )}
         style={{ left: x + 20, top: y - 20 }}
+        onMouseEnter={onMouseEnter}
+        onMouseLeave={onMouseLeave}
+        onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2 text-muted-foreground animate-pulse">
           <div className="h-4 w-4 bg-muted rounded-full" />
@@ -59,10 +71,12 @@ export default function NodeDetailCard({ idiomName, x, y, onClose, isHover }: No
       <div 
         className={cn(
           "absolute z-[60] bg-background/95 backdrop-blur-md border border-destructive/50 shadow-2xl rounded-2xl p-4 w-64 animate-in fade-in zoom-in-95 duration-200",
-          !isHover && "pointer-events-auto",
-          isHover && "pointer-events-none"
+          "pointer-events-auto"
         )}
         style={{ left: x + 20, top: y - 20 }}
+        onMouseEnter={onMouseEnter}
+        onMouseLeave={onMouseLeave}
+        onClick={(e) => e.stopPropagation()}
       >
         <p className="text-xs text-destructive font-medium">{error || t('notFound')}</p>
         {!isHover && <button onClick={onClose} className="mt-2 text-[10px] text-muted-foreground hover:underline">{tCommon('cancel')}</button>}
@@ -73,12 +87,12 @@ export default function NodeDetailCard({ idiomName, x, y, onClose, isHover }: No
   return (
     <div 
       className={cn(
-        "absolute z-[60] bg-background/95 backdrop-blur-xl border border-border/50 shadow-2xl rounded-2xl w-72 overflow-hidden animate-in fade-in slide-in-from-left-2 duration-300",
-        !isHover && "pointer-events-auto",
-        isHover && "pointer-events-none"
+        "absolute z-[60] bg-background/95 backdrop-blur-xl border border-border/50 shadow-2xl rounded-2xl w-72 overflow-hidden animate-in fade-in slide-in-from-left-2 duration-300 pointer-events-auto"
       )}
       style={{ left: x + 20, top: y - 20 }}
-      onClick={(e) => !isHover && e.stopPropagation()}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      onClick={(e) => e.stopPropagation()}
     >
       {/* Header */}
       <div className="px-4 py-3 bg-gradient-to-r from-primary/10 to-transparent border-b border-border/50 flex justify-between items-center">
@@ -86,9 +100,11 @@ export default function NodeDetailCard({ idiomName, x, y, onClose, isHover }: No
           <BookOpen className="h-4 w-4 text-primary" />
           <span className="font-bold text-sm tracking-tight">{data.idiom}</span>
         </div>
-        <button onClick={onClose} className="p-1 hover:bg-muted rounded-full transition-colors">
-          <X className="h-3 w-3 text-muted-foreground" />
-        </button>
+        {!isHover && (
+          <button onClick={onClose} className="p-1 hover:bg-muted rounded-full transition-colors">
+            <X className="h-3 w-3 text-muted-foreground" />
+          </button>
+        )}
       </div>
 
       <div className="p-4 space-y-4 max-h-[400px] overflow-y-auto custom-scrollbar">

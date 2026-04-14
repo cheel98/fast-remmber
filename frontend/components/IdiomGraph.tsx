@@ -44,6 +44,12 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess, isA
   const t = useTranslations('IdiomGraph');
   const { theme } = useTheme();
   const isLight = theme && theme.startsWith('light');
+  const relationLabelMap: Record<string, string> = {
+    SYNONYM: t('labels.synonym'),
+    ANTONYM: t('labels.antonym'),
+    RELATED: t('labels.related'),
+    ANALOGY: t('labels.analogy'),
+  };
   const fgRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [data, setData] = useState<GraphData>({ nodes: [], links: [] });
@@ -64,6 +70,7 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess, isA
   // Detail Card state
   const [detailCardNode, setDetailCardNode] = useState<any>(null);
   const [hoverCardNode, setHoverCardNode] = useState<any>(null);
+  const [hoverCardLink, setHoverCardLink] = useState<any>(null);
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -77,7 +84,11 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess, isA
   const [isRelationshipModalOpen, setIsRelationshipModalOpen] = useState(false);
   const [linkingTarget, setLinkingTarget] = useState<any>(null);
 
-  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const nodeHoverShowTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const nodeHoverHideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const linkHoverHideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isHoveringNodeCardRef = useRef(false);
+  const isHoveringLinkCardRef = useRef(false);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -107,6 +118,14 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess, isA
     return () => cancelAnimationFrame(animationFrameId);
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (nodeHoverShowTimeoutRef.current) clearTimeout(nodeHoverShowTimeoutRef.current);
+      if (nodeHoverHideTimeoutRef.current) clearTimeout(nodeHoverHideTimeoutRef.current);
+      if (linkHoverHideTimeoutRef.current) clearTimeout(linkHoverHideTimeoutRef.current);
+    };
+  }, []);
+
   const handleZoomIn = useCallback(() => {
     if (fgRef.current) {
       const currentZoom = fgRef.current.zoom();
@@ -132,38 +151,152 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess, isA
     setHighlightLinks(new Set(highlightLinks));
   };
 
-  const handleNodeHover = (node: any) => {
-    // Clear previous timeout
-    if (hoverTimeoutRef.current) {
-      clearTimeout(hoverTimeoutRef.current);
-      hoverTimeoutRef.current = null;
-    }
-
+  const applyNodeHighlight = (node: any) => {
     highlightNodes.clear();
     highlightLinks.clear();
+
+    if (!node) {
+      updateHighlight();
+      return;
+    }
+
+    highlightNodes.add(node.id);
+    data.links.forEach((link: any) => {
+      const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+      const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+
+      if (sourceId === node.id || targetId === node.id) {
+        highlightLinks.add(link);
+        highlightNodes.add(sourceId);
+        highlightNodes.add(targetId);
+      }
+    });
+
+    updateHighlight();
+  };
+
+  const applyLinkHighlight = (link: any) => {
+    highlightNodes.clear();
+    highlightLinks.clear();
+
+    if (!link) {
+      updateHighlight();
+      return;
+    }
+
+    highlightLinks.add(link);
+    highlightNodes.add(typeof link.source === 'object' ? link.source.id : link.source);
+    highlightNodes.add(typeof link.target === 'object' ? link.target.id : link.target);
+    updateHighlight();
+  };
+
+  const clearNodeHoverTimers = () => {
+    if (nodeHoverShowTimeoutRef.current) {
+      clearTimeout(nodeHoverShowTimeoutRef.current);
+      nodeHoverShowTimeoutRef.current = null;
+    }
+
+    if (nodeHoverHideTimeoutRef.current) {
+      clearTimeout(nodeHoverHideTimeoutRef.current);
+      nodeHoverHideTimeoutRef.current = null;
+    }
+  };
+
+  const clearLinkHoverTimer = () => {
+    if (linkHoverHideTimeoutRef.current) {
+      clearTimeout(linkHoverHideTimeoutRef.current);
+      linkHoverHideTimeoutRef.current = null;
+    }
+  };
+
+  const clearNodeHoverState = () => {
+    clearNodeHoverTimers();
+    isHoveringNodeCardRef.current = false;
+    setHoverNode(null);
+    setHoverCardNode(null);
+    applyNodeHighlight(null);
+  };
+
+  const clearLinkHoverState = () => {
+    clearLinkHoverTimer();
+    isHoveringLinkCardRef.current = false;
+    setHoverLink(null);
+    setHoverCardLink(null);
+    applyLinkHighlight(null);
+  };
+
+  const scheduleNodeHoverClear = () => {
+    if (nodeHoverHideTimeoutRef.current) {
+      clearTimeout(nodeHoverHideTimeoutRef.current);
+    }
+
+    nodeHoverHideTimeoutRef.current = setTimeout(() => {
+      nodeHoverHideTimeoutRef.current = null;
+      if (isHoveringNodeCardRef.current) {
+        return;
+      }
+      clearNodeHoverState();
+    }, 160);
+  };
+
+  const scheduleLinkHoverClear = () => {
+    if (linkHoverHideTimeoutRef.current) {
+      clearTimeout(linkHoverHideTimeoutRef.current);
+    }
+
+    linkHoverHideTimeoutRef.current = setTimeout(() => {
+      linkHoverHideTimeoutRef.current = null;
+      if (isHoveringLinkCardRef.current) {
+        return;
+      }
+      clearLinkHoverState();
+    }, 160);
+  };
+
+  const handleHoverNodeCardEnter = () => {
+    clearNodeHoverTimers();
+    isHoveringNodeCardRef.current = true;
+    if (hoverCardNode) {
+      setHoverNode(hoverCardNode);
+      applyNodeHighlight(hoverCardNode);
+    }
+  };
+
+  const handleHoverNodeCardLeave = () => {
+    isHoveringNodeCardRef.current = false;
+    scheduleNodeHoverClear();
+  };
+
+  const handleHoverLinkCardEnter = () => {
+    clearLinkHoverTimer();
+    isHoveringLinkCardRef.current = true;
+    if (hoverCardLink) {
+      setHoverLink(hoverCardLink);
+      applyLinkHighlight(hoverCardLink);
+    }
+  };
+
+  const handleHoverLinkCardLeave = () => {
+    isHoveringLinkCardRef.current = false;
+    scheduleLinkHoverClear();
+  };
+
+  const handleNodeHover = (node: any) => {
     if (node) {
-      highlightNodes.add(node.id);
-      data.links.forEach((link: any) => {
-        const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
-        const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+      clearNodeHoverTimers();
+      clearLinkHoverState();
 
-        if (sourceId === node.id || targetId === node.id) {
-          highlightLinks.add(link);
-          highlightNodes.add(sourceId);
-          highlightNodes.add(targetId);
-        }
-      });
+      applyNodeHighlight(node);
+      setHoverNode(node);
 
-      // Trigger detail fetch after a short delay (debounce)
-      hoverTimeoutRef.current = setTimeout(() => {
+      nodeHoverShowTimeoutRef.current = setTimeout(() => {
         if (onShowDetails) onShowDetails(node.id);
         setHoverCardNode(node);
+        nodeHoverShowTimeoutRef.current = null;
       }, 300);
     } else {
-      setHoverCardNode(null);
+      scheduleNodeHoverClear();
     }
-    setHoverNode(node || null);
-    updateHighlight();
   };
 
   const handleNodeRightClick = (node: any, event: any) => {
@@ -171,6 +304,7 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess, isA
     setHoverNode(null);
     setHoverLink(null);
     setHoverCardNode(null); // Hide hover card
+    setHoverCardLink(null);
     setLinkContextMenu(null);
     setContextMenu({ x: event.clientX, y: event.clientY, node });
   };
@@ -180,6 +314,7 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess, isA
     setHoverNode(null);
     setHoverLink(null);
     setHoverCardNode(null); // Hide hover card
+    setHoverCardLink(null);
     setContextMenu(null);
 
     // Calculate position relative to container
@@ -450,33 +585,18 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess, isA
         onNodeHover={handleNodeHover}
         onNodeRightClick={handleNodeRightClick}
         onLinkHover={(link: any) => {
-          setHoverLink(link);
-          highlightNodes.clear();
-          highlightLinks.clear();
-
           if (link) {
-            highlightLinks.add(link);
-            highlightNodes.add(typeof link.source === 'object' ? link.source.id : link.source);
-            highlightNodes.add(typeof link.target === 'object' ? link.target.id : link.target);
+            clearLinkHoverTimer();
+            clearNodeHoverState();
+            setHoverLink(link);
+            setHoverCardLink(link);
+            applyLinkHighlight(link);
+          } else {
+            scheduleLinkHoverClear();
           }
-          updateHighlight();
         }}
         onLinkRightClick={handleLinkRightClick}
-        linkLabel={(link: any) => {
-          if (contextMenu || linkContextMenu) return ''; // Hide tooltip if menu is open
-
-          const labelMap: Record<string, string> = {
-            'SYNONYM': t('labels.synonym'),
-            'ANTONYM': t('labels.antonym'),
-            'RELATED': t('labels.related'),
-            'ANALOGY': t('labels.analogy')
-          };
-          const labelStr = labelMap[link.label] || link.label;
-          return `<div class="bg-popover/90 backdrop-blur border border-border p-2 rounded shadow-lg text-xs">
-            <span class="font-bold text-primary">${labelStr}</span>
-            <span class="text-muted-foreground ml-2">(${t('labels.strength')}: ${(link.strength || 0.5).toFixed(2)})</span>
-          </div>`;
-        }}
+        linkLabel={() => ''}
         nodePointerAreaPaint={(node: any, color, ctx) => {
           if (typeof node.x !== 'number' || typeof node.y !== 'number' || isNaN(node.x) || isNaN(node.y)) {
             return;
@@ -704,7 +824,65 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess, isA
               y={coords.y}
               onClose={() => { }}
               isHover={true}
+              onMouseEnter={handleHoverNodeCardEnter}
+              onMouseLeave={handleHoverNodeCardLeave}
             />
+          );
+        })()
+      )}
+
+      {hoverCardLink && !detailCardNode && !contextMenu && !linkContextMenu && fgRef.current && (
+        (() => {
+          const sourceNode = typeof hoverCardLink.source === 'object'
+            ? hoverCardLink.source
+            : data.nodes.find((node) => node.id === hoverCardLink.source);
+          const targetNode = typeof hoverCardLink.target === 'object'
+            ? hoverCardLink.target
+            : data.nodes.find((node) => node.id === hoverCardLink.target);
+
+          if (
+            !sourceNode ||
+            !targetNode ||
+            typeof sourceNode.x !== 'number' ||
+            typeof sourceNode.y !== 'number' ||
+            typeof targetNode.x !== 'number' ||
+            typeof targetNode.y !== 'number'
+          ) {
+            return null;
+          }
+
+          const coords = fgRef.current.graph2ScreenCoords(
+            (sourceNode.x + targetNode.x) / 2,
+            (sourceNode.y + targetNode.y) / 2
+          );
+
+          return (
+            <div
+              className="absolute z-[60] w-64 rounded-2xl border border-border/60 bg-background/95 p-4 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-200"
+              style={{ left: coords.x + 18, top: coords.y - 24 }}
+              onMouseEnter={handleHoverLinkCardEnter}
+              onMouseLeave={handleHoverLinkCardLeave}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-3 flex items-center justify-between gap-3 border-b border-border/40 pb-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-primary">
+                  {relationLabelMap[hoverCardLink.label] || hoverCardLink.label}
+                </span>
+                <span className="rounded-full border border-border/50 bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  {t('labels.strength')}: {(hoverCardLink.strength || 0.5).toFixed(2)}
+                </span>
+              </div>
+              <div className="space-y-2 text-xs">
+                <div className="rounded-xl border border-border/40 bg-muted/20 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Source</p>
+                  <p className="mt-1 font-semibold text-foreground">{sourceNode.id}</p>
+                </div>
+                <div className="rounded-xl border border-border/40 bg-muted/20 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Target</p>
+                  <p className="mt-1 font-semibold text-foreground">{targetNode.id}</p>
+                </div>
+              </div>
+            </div>
           );
         })()
       )}
