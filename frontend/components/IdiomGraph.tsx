@@ -9,6 +9,7 @@ import { GraphData, fetchGraph, saveIdiom, IdiomResult, associateIdioms, dissoci
 import CustomExpandModal from './CustomExpandModal';
 import NodeDetailCard from './NodeDetailCard';
 import RelationshipModal from './RelationshipModal';
+import RelationshipDetailCard from './RelationshipDetailCard';
 
 // Dynamically import ForceGraph2D to prevent SSR window is not defined errors
 const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), { ssr: false });
@@ -26,7 +27,6 @@ const GRAPH_LAYOUT = {
   linkGap: 10,
   linkStrength: 0.55,
   chargeStrength: -260,
-  breathingAmplitude: 0.5,
   glowPadding: 4,
   glowSpread: 6,
   pointerRadiusInset: 0.5,
@@ -54,7 +54,6 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess, isA
   const containerRef = useRef<HTMLDivElement>(null);
   const [data, setData] = useState<GraphData>({ nodes: [], links: [] });
   const [loading, setLoading] = useState(true);
-  const [frame, setFrame] = useState(0);
   const lastClickRef = useRef({ node: null, time: 0 });
 
   // Highlight states
@@ -105,17 +104,6 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess, isA
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, []);
-
-  // Animation frame loop to force redraws for the "breathing" effect
-  useEffect(() => {
-    let animationFrameId: number;
-    const animate = () => {
-      setFrame(f => f + 1);
-      animationFrameId = requestAnimationFrame(animate);
-    };
-    animationFrameId = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(animationFrameId);
   }, []);
 
   useEffect(() => {
@@ -368,7 +356,14 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess, isA
     setCurrentPointerPos({ x: node.x, y: node.y });
   };
 
-  const handleRelationshipSubmit = async (params: { label: string; strength: number }) => {
+  const handleRelationshipSubmit = async (params: {
+    label: string;
+    strength: number;
+    similarityType?: string;
+    difference?: string;
+    sourceExample?: string;
+    targetExample?: string;
+  }) => {
     if (linkingSource && linkingTarget) {
       // If we are editing (linkContextMenu exists) and the label changed, delete the old one first
       if (linkContextMenu && linkContextMenu.link.label !== params.label) {
@@ -379,7 +374,12 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess, isA
         );
       }
 
-      await associateIdioms(linkingSource.id, linkingTarget.id, params.label, params.strength);
+      await associateIdioms(linkingSource.id, linkingTarget.id, params.label, params.strength, {
+        similarityType: params.similarityType,
+        difference: params.difference,
+        sourceExample: params.sourceExample,
+        targetExample: params.targetExample,
+      });
       fetchGraph().then(setData); // Refresh graph
       setLinkingSource(null);
       setLinkingTarget(null);
@@ -412,7 +412,12 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess, isA
     const t = typeof link.target === 'object' ? link.target.id : link.target;
 
     await dissociateIdioms(s, t, link.label);
-    await associateIdioms(t, s, link.label, link.strength);
+    await associateIdioms(t, s, link.label, link.strength, {
+      similarityType: link.similarityType,
+      difference: link.difference,
+      sourceExample: link.targetExample,
+      targetExample: link.sourceExample,
+    });
     fetchGraph().then(setData);
     setLinkContextMenu(null);
   };
@@ -506,10 +511,8 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess, isA
             return;
           }
           const label = node.label || '';
-          const time = Date.now() / 1000;
-
           const baseRadius = getNodeBaseRadius(node);
-          const r = baseRadius + Math.sin(time * 2) * GRAPH_LAYOUT.breathingAmplitude;
+          const r = baseRadius;
 
           // Highlight logic
           const isHighlighted = highlightNodes.has(node.id);
@@ -766,6 +769,10 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess, isA
         targetId={linkingTarget?.id}
         initialLabel={linkContextMenu?.link.label}
         initialStrength={linkContextMenu?.link.strength}
+        initialSimilarityType={linkContextMenu?.link.similarityType}
+        initialDifference={linkContextMenu?.link.difference}
+        initialSourceExample={linkContextMenu?.link.sourceExample}
+        initialTargetExample={linkContextMenu?.link.targetExample}
         onSubmit={handleRelationshipSubmit}
         onDelete={linkContextMenu ? handleRelationshipDelete : undefined}
       />
@@ -857,32 +864,16 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess, isA
           );
 
           return (
-            <div
-              className="absolute z-[60] w-64 rounded-2xl border border-border/60 bg-background/95 p-4 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-200"
-              style={{ left: coords.x + 18, top: coords.y - 24 }}
+            <RelationshipDetailCard
+              relation={hoverCardLink}
+              sourceIdiom={sourceNode.id}
+              targetIdiom={targetNode.id}
+              relationLabel={relationLabelMap[hoverCardLink.label] || hoverCardLink.label}
+              x={coords.x}
+              y={coords.y}
               onMouseEnter={handleHoverLinkCardEnter}
               onMouseLeave={handleHoverLinkCardLeave}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="mb-3 flex items-center justify-between gap-3 border-b border-border/40 pb-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-primary">
-                  {relationLabelMap[hoverCardLink.label] || hoverCardLink.label}
-                </span>
-                <span className="rounded-full border border-border/50 bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                  {t('labels.strength')}: {(hoverCardLink.strength || 0.5).toFixed(2)}
-                </span>
-              </div>
-              <div className="space-y-2 text-xs">
-                <div className="rounded-xl border border-border/40 bg-muted/20 px-3 py-2">
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Source</p>
-                  <p className="mt-1 font-semibold text-foreground">{sourceNode.id}</p>
-                </div>
-                <div className="rounded-xl border border-border/40 bg-muted/20 px-3 py-2">
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Target</p>
-                  <p className="mt-1 font-semibold text-foreground">{targetNode.id}</p>
-                </div>
-              </div>
-            </div>
+            />
           );
         })()
       )}

@@ -1,9 +1,13 @@
 package models
 
 type RelationshipDetail struct {
-	Name         string  `json:"name"`
-	Strength     float64 `json:"strength"` // 0.0 to 1.0
-	HasAIExplore bool    `json:"hasAIExplore"`
+	Name           string  `json:"name"`
+	Strength       float64 `json:"strength"` // 0.0 to 1.0
+	SimilarityType string  `json:"similarityType,omitempty"`
+	Difference     string  `json:"difference,omitempty"`
+	SourceExample  string  `json:"sourceExample,omitempty"`
+	TargetExample  string  `json:"targetExample,omitempty"`
+	HasAIExplore   bool    `json:"hasAIExplore"`
 }
 
 type UsageExample struct {
@@ -33,10 +37,14 @@ type GraphNode struct {
 }
 
 type GraphLink struct {
-	Source   string  `json:"source"`
-	Target   string  `json:"target"`
-	Label    string  `json:"label"` // e.g. "SYNONYM", "ANTONYM"
-	Strength float64 `json:"strength"`
+	Source         string  `json:"source"`
+	Target         string  `json:"target"`
+	Label          string  `json:"label"` // e.g. "SYNONYM", "ANTONYM"
+	Strength       float64 `json:"strength"`
+	SimilarityType string  `json:"similarityType,omitempty"`
+	Difference     string  `json:"difference,omitempty"`
+	SourceExample  string  `json:"sourceExample,omitempty"`
+	TargetExample  string  `json:"targetExample,omitempty"`
 }
 
 type GraphData struct {
@@ -45,10 +53,14 @@ type GraphData struct {
 }
 
 type AssociateRequest struct {
-	Source   string  `json:"source" binding:"required"`
-	Target   string  `json:"target" binding:"required"`
-	Label    string  `json:"label"` // Optional, e.g. "RELATED"
-	Strength float64 `json:"strength"`
+	Source         string  `json:"source" binding:"required"`
+	Target         string  `json:"target" binding:"required"`
+	Label          string  `json:"label"` // Optional, e.g. "RELATED"
+	Strength       float64 `json:"strength"`
+	SimilarityType string  `json:"similarityType,omitempty"`
+	Difference     string  `json:"difference,omitempty"`
+	SourceExample  string  `json:"sourceExample,omitempty"`
+	TargetExample  string  `json:"targetExample,omitempty"`
 }
 
 type DissociateRequest struct {

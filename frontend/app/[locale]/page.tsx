@@ -9,6 +9,7 @@ import IdiomGraph from '@/components/IdiomGraph';
 import LanguageSwitcher from '@/components/LanguageSwitcher';
 import { SkinToggle } from '@/components/skin-toggle';
 import UsageExamples from '@/components/UsageExamples';
+import RelatedIdiomCard from '@/components/RelatedIdiomCard';
 import AuthPanel from '@/components/AuthPanel';
 import DiscoveryHistory from '@/components/DiscoveryHistory';
 import { analyzeIdiom, saveIdiom, IdiomResult, fetchIdiomDetail, deleteIdiom, loginUser, registerUser, fetchCurrentUser, fetchDiscoveryHistory, clearStoredAuthToken, setStoredAuthToken, getStoredAuthToken, AuthUser, DiscoveryRecord } from '@/lib/api';
@@ -53,10 +54,10 @@ export default function Home() {
   const [editedEmotions, setEditedEmotions] = useState('');
   const [selectedSyns, setSelectedSyns] = useState<Set<string>>(new Set());
   const [selectedAnts, setSelectedAnts] = useState<Set<string>>(new Set());
-  
+
   // Inspector (Node Details) state
   const [inspectorResult, setInspectorResult] = useState<IdiomResult | null>(null);
-  
+
   // UI State
   const [activeTab, setActiveTab] = useState<'discovery' | 'inspector'>('discovery');
   const [loading, setLoading] = useState(false);
@@ -83,7 +84,7 @@ export default function Home() {
   const [savedAnts, setSavedAnts] = useState<Set<string>>(new Set());
   const [isCurrentIdiomSaved, setIsCurrentIdiomSaved] = useState(false);
   const [isTopBarVisible, setIsTopBarVisible] = useState(true);
-  const [isGraphPinned, setIsGraphPinned] = useState(false);
+  const [isGraphPinned, setIsGraphPinned] = useState(true);
   const [graphPinnedHeight, setGraphPinnedHeight] = useState<number | null>(null);
   const [graphPinnedTop, setGraphPinnedTop] = useState<number | null>(null);
   const [graphPinnedStyle, setGraphPinnedStyle] = useState<React.CSSProperties>({});
@@ -399,8 +400,8 @@ export default function Home() {
 
   const hasPendingGraphChanges = analysisResult
     ? !isCurrentIdiomSaved ||
-      !areSetsEqual(selectedSyns, savedSyns) ||
-      !areSetsEqual(selectedAnts, savedAnts)
+    !areSetsEqual(selectedSyns, savedSyns) ||
+    !areSetsEqual(selectedAnts, savedAnts)
     : false;
 
   const isGraphSynced = Boolean(analysisResult) && isCurrentIdiomSaved && !hasPendingGraphChanges;
@@ -444,7 +445,7 @@ export default function Home() {
         ...currentResult,
         meaning: editedMeaning,
         emotions: editedEmotions,
-        synonyms: activeTab === 'discovery' 
+        synonyms: activeTab === 'discovery'
           ? currentResult.synonyms.filter(s => selectedSyns.has(s.name))
           : currentResult.synonyms,
         antonyms: activeTab === 'discovery'
@@ -452,7 +453,7 @@ export default function Home() {
           : currentResult.antonyms,
       };
       await saveIdiom(updatedData);
-      
+
       if (activeTab === 'discovery') {
         setAnalysisResult(updatedData);
         setSelectedSyns(new Set(updatedData.synonyms.map(s => s.name)));
@@ -463,7 +464,7 @@ export default function Home() {
       } else {
         setInspectorResult(updatedData);
       }
-      
+
       setIsEditing(false);
       setSaveSuccess(true);
       setGraphKey(prev => prev + 1);
@@ -609,7 +610,7 @@ export default function Home() {
             <ChevronLeft className="h-4 w-4" />
           </button>
         )}
-        
+
         {isCollapsed && (
           <button
             onClick={() => setIsCollapsed(false)}
@@ -621,7 +622,7 @@ export default function Home() {
         )}
 
         {/* Left Panel: Search & Info */}
-        <aside 
+        <aside
           className={cn(
             "w-full lg:w-96 flex-shrink-0 border-r border-border/40 bg-muted/10 p-6 flex flex-col gap-6 overflow-y-auto transition-all duration-300 ease-in-out",
             isCollapsed && "lg:-ml-96 lg:opacity-0 pointer-events-none"
@@ -644,7 +645,7 @@ export default function Home() {
             />
 
             <h2 className="text-lg font-semibold">{t('discovery')}</h2>
-            
+
             {/* Tab Switcher */}
             <div className="flex border-b border-border/40 mb-4 relative">
               <button
@@ -657,7 +658,7 @@ export default function Home() {
                 {t('discovery')}
                 {analysisResult && <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-primary rounded-full animate-pulse z-10" />}
                 {activeTab === 'discovery' && (
-                  <motion.div 
+                  <motion.div
                     layoutId="activeTab"
                     className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary"
                     transition={{ type: "spring", stiffness: 500, damping: 30 }}
@@ -673,7 +674,7 @@ export default function Home() {
               >
                 {t('inspector')}
                 {activeTab === 'inspector' && (
-                  <motion.div 
+                  <motion.div
                     layoutId="activeTab"
                     className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary"
                     transition={{ type: "spring", stiffness: 500, damping: 30 }}
@@ -733,7 +734,7 @@ export default function Home() {
                           <h4 className="font-bold text-2xl text-primary">{analysisResult.idiom}</h4>
                           <div className="flex gap-1 items-center">
                             {!analysisResult.hasAIExplore && (
-                              <button 
+                              <button
                                 onClick={() => performSearch(analysisResult.idiom)}
                                 className="p-1.5 hover:bg-primary/10 rounded-md text-primary transition-colors flex items-center gap-1.5 text-xs font-medium"
                                 disabled={loading}
@@ -744,7 +745,7 @@ export default function Home() {
                               </button>
                             )}
                             {!isEditing ? (
-                              <button 
+                              <button
                                 onClick={() => setIsEditing(true)}
                                 className="p-1.5 hover:bg-muted rounded-md text-muted-foreground transition-colors opacity-0 group-hover:opacity-100"
                                 title="Edit Info"
@@ -753,14 +754,14 @@ export default function Home() {
                               </button>
                             ) : (
                               <div className="flex gap-1">
-                                <button 
+                                <button
                                   onClick={handleSaveEdit}
                                   className="p-1.5 hover:bg-green-100 text-green-600 rounded-md transition-colors"
                                   title="Save Changes"
                                 >
                                   <Check className="h-4 w-4" />
                                 </button>
-                                <button 
+                                <button
                                   onClick={() => {
                                     setIsEditing(false);
                                     setEditedMeaning(analysisResult.meaning);
@@ -792,7 +793,7 @@ export default function Home() {
                             />
                           )}
                         </div>
-                        
+
                         <div className="space-y-4">
                           <div>
                             <div className="flex items-center gap-1.5 mb-1">
@@ -811,55 +812,31 @@ export default function Home() {
                           </div>
 
                           <UsageExamples idiom={analysisResult.idiom} idiomMeaning={analysisResult.meaning} examples={analysisResult.examples} />
-                          
+
                           {analysisResult.synonyms && analysisResult.synonyms.length > 0 && (
                             <div>
                               <div className="flex items-center gap-1.5 mb-1.5">
                                 <TrendingUp className="h-3.5 w-3.5 text-emerald-500" />
                                 <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t('synonyms')}</span>
                               </div>
-                              <div className="flex flex-wrap gap-1 mt-1.5">
+                              <div className="mt-1.5 space-y-2">
                                 {analysisResult.synonyms.map(syn => (
                                   (() => {
                                     const action = getRelationAction(syn.name, selectedSyns, savedSyns);
 
                                     return (
-                                  <span
-                                    key={syn.name}
-                                    title={getRelationActionLabel(action)}
-                                    className={cn(
-                                      "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-all focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 group/tag",
-                                      action === 'saved' && "bg-secondary text-secondary-foreground",
-                                      action === 'add' && "border-emerald-200 bg-emerald-50 text-emerald-700",
-                                      action === 'remove' && "border-amber-200 bg-amber-50 text-amber-700 line-through",
-                                      action === 'idle' && "bg-muted/50 text-muted-foreground opacity-60 border-transparent"
-                                    )}
-                                  >
-                                    <div 
-                                      className="flex items-center gap-1 cursor-pointer hover:text-primary transition-colors"
-                                      onClick={() => toggleSyn(syn.name)}
-                                    >
-                                      {action === 'saved' ? (
-                                        <Check className="h-3 w-3" />
-                                      ) : action === 'add' ? (
-                                        <Plus className="h-3 w-3" />
-                                      ) : action === 'remove' ? (
-                                        <Minus className="h-3 w-3" />
-                                      ) : (
-                                        <div className="h-3 w-3 rounded-sm border border-current" />
-                                      )}
-                                      {syn.name} ({Math.round(syn.strength * 100)}%)
-                                    </div>
-                                    {!syn.hasAIExplore && (
-                                      <button 
-                                        onClick={() => performSearch(syn.name)}
-                                        className="opacity-0 group-hover/tag:opacity-100 hover:text-primary transition-all ml-0.5"
-                                        title={t('aiExplore')}
-                                      >
-                                        <Compass className="h-3 w-3" />
-                                      </button>
-                                    )}
-                                  </span>
+                                      <RelatedIdiomCard
+                                        key={syn.name}
+                                        relation={syn}
+                                        sourceIdiom={analysisResult.idiom}
+                                        tone="synonym"
+                                        action={action}
+                                        actionTitle={getRelationActionLabel(action)}
+                                        onToggle={() => toggleSyn(syn.name)}
+                                        onExplore={() => performSearch(syn.name)}
+                                        exploreTitle={t('aiExplore')}
+                                        showExplore
+                                      />
                                     );
                                   })()
                                 ))}
@@ -873,48 +850,24 @@ export default function Home() {
                                 <TrendingDown className="h-3.5 w-3.5 text-rose-500" />
                                 <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t('antonyms')}</span>
                               </div>
-                              <div className="flex flex-wrap gap-1 mt-1.5">
+                              <div className="mt-1.5 space-y-2">
                                 {analysisResult.antonyms.map(ant => (
                                   (() => {
                                     const action = getRelationAction(ant.name, selectedAnts, savedAnts);
 
                                     return (
-                                  <span
-                                    key={ant.name}
-                                    title={getRelationActionLabel(action)}
-                                    className={cn(
-                                      "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-all focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 group/tag",
-                                      action === 'saved' && "border-destructive/20 bg-destructive/10 text-destructive",
-                                      action === 'add' && "border-emerald-200 bg-emerald-50 text-emerald-700",
-                                      action === 'remove' && "border-amber-200 bg-amber-50 text-amber-700 line-through",
-                                      action === 'idle' && "bg-muted/50 text-muted-foreground opacity-60 border-transparent"
-                                    )}
-                                  >
-                                    <div 
-                                      className="flex items-center gap-1 cursor-pointer hover:text-primary transition-colors"
-                                      onClick={() => toggleAnt(ant.name)}
-                                    >
-                                      {action === 'saved' ? (
-                                        <Check className="h-3 w-3 text-destructive" />
-                                      ) : action === 'add' ? (
-                                        <Plus className="h-3 w-3" />
-                                      ) : action === 'remove' ? (
-                                        <Minus className="h-3 w-3" />
-                                      ) : (
-                                        <div className="h-3 w-3 rounded-sm border border-current" />
-                                      )}
-                                      {ant.name} ({Math.round(ant.strength * 100)}%)
-                                    </div>
-                                    {!ant.hasAIExplore && (
-                                      <button 
-                                        onClick={() => performSearch(ant.name)}
-                                        className="opacity-0 group-hover/tag:opacity-100 hover:text-primary transition-all ml-0.5"
-                                        title={t('aiExplore')}
-                                      >
-                                        <Compass className="h-3 w-3 text-primary" />
-                                      </button>
-                                    )}
-                                  </span>
+                                      <RelatedIdiomCard
+                                        key={ant.name}
+                                        relation={ant}
+                                        sourceIdiom={analysisResult.idiom}
+                                        tone="antonym"
+                                        action={action}
+                                        actionTitle={getRelationActionLabel(action)}
+                                        onToggle={() => toggleAnt(ant.name)}
+                                        onExplore={() => performSearch(ant.name)}
+                                        exploreTitle={t('aiExplore')}
+                                        showExplore
+                                      />
                                     );
                                   })()
                                 ))}
@@ -922,7 +875,7 @@ export default function Home() {
                             </div>
                           )}
                         </div>
-                        
+
                         <div className="mt-6 pt-4 border-t w-full flex flex-col gap-2">
                           <button
                             onClick={handleSave}
@@ -969,7 +922,7 @@ export default function Home() {
                         <h4 className="font-bold text-2xl text-primary">{inspectorResult.idiom}</h4>
                         <div className="flex gap-1 items-center">
                           {!inspectorResult.hasAIExplore && (
-                            <button 
+                            <button
                               onClick={() => performSearch(inspectorResult.idiom)}
                               className="p-1.5 hover:bg-primary/10 rounded-md text-primary transition-colors flex items-center gap-1.5 text-xs font-medium"
                               disabled={loading || !currentUser}
@@ -979,9 +932,9 @@ export default function Home() {
                               <span>{t('aiExplore')}</span>
                             </button>
                           )}
-                          
+
                           {!isEditing ? (
-                            <button 
+                            <button
                               onClick={() => {
                                 setIsEditing(true);
                                 setEditedMeaning(inspectorResult.meaning || '');
@@ -995,7 +948,7 @@ export default function Home() {
                             </button>
                           ) : (
                             <div className="flex gap-1">
-                              <button 
+                              <button
                                 onClick={handleSaveEdit}
                                 className="p-1.5 hover:bg-green-100 text-green-600 rounded-md transition-colors"
                                 title="Save Changes"
@@ -1003,7 +956,7 @@ export default function Home() {
                               >
                                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                               </button>
-                              <button 
+                              <button
                                 onClick={() => setIsEditing(false)}
                                 className="p-1.5 hover:bg-red-100 text-red-600 rounded-md transition-colors"
                                 title="Cancel"
@@ -1014,7 +967,7 @@ export default function Home() {
                           )}
 
                           {!isEditing && (
-                            <button 
+                            <button
                               onClick={handleDelete}
                               className="p-1.5 hover:bg-red-100 text-red-600 rounded-md transition-colors opacity-0 group-hover:opacity-100"
                               title="Delete Idiom"
@@ -1042,7 +995,7 @@ export default function Home() {
                           />
                         )}
                       </div>
-                      
+
                       <div className="space-y-4">
                         <div>
                           <div className="flex items-center gap-1.5 mb-1">
@@ -1061,21 +1014,21 @@ export default function Home() {
                         </div>
 
                         <UsageExamples idiom={inspectorResult.idiom} idiomMeaning={inspectorResult.meaning} examples={inspectorResult.examples} />
-                        
+
                         {inspectorResult.synonyms && inspectorResult.synonyms.length > 0 && (
                           <div>
                             <div className="flex items-center gap-1.5 mb-1.5">
                               <TrendingUp className="h-3.5 w-3.5 text-emerald-500" />
                               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t('synonyms')}</span>
                             </div>
-                            <div className="flex flex-wrap gap-1 mt-1.5">
+                            <div className="mt-1.5 space-y-2">
                               {inspectorResult.synonyms.map(syn => (
-                                <span 
-                                  key={syn.name} 
-                                  className="inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold bg-muted/30 text-muted-foreground border-transparent"
-                                >
-                                  {syn.name}
-                                </span>
+                                <RelatedIdiomCard
+                                  key={syn.name}
+                                  relation={syn}
+                                  sourceIdiom={inspectorResult.idiom}
+                                  tone="synonym"
+                                />
                               ))}
                             </div>
                           </div>
@@ -1087,14 +1040,14 @@ export default function Home() {
                               <TrendingDown className="h-3.5 w-3.5 text-rose-500" />
                               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{t('antonyms')}</span>
                             </div>
-                            <div className="flex flex-wrap gap-1 mt-1.5">
+                            <div className="mt-1.5 space-y-2">
                               {inspectorResult.antonyms.map(ant => (
-                                <span 
-                                  key={ant.name} 
-                                  className="inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold bg-muted/30 text-muted-foreground border-transparent"
-                                >
-                                  {ant.name}
-                                </span>
+                                <RelatedIdiomCard
+                                  key={ant.name}
+                                  relation={ant}
+                                  sourceIdiom={inspectorResult.idiom}
+                                  tone="antonym"
+                                />
                               ))}
                             </div>
                           </div>

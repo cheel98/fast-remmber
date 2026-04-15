@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, Send, Loader2, Sparkles, BookOpen, Activity, TrendingUp, TrendingDown, Smile, Frown, Meh } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
@@ -20,8 +20,30 @@ export default function CustomExpandModal({ isOpen, onClose, sourceNode, onSubmi
   const [emotion, setEmotion] = useState(t('neu'));
   const [relType, setRelType] = useState<'SYNONYM' | 'ANTONYM'>('SYNONYM');
   const [strength, setStrength] = useState(0.8);
+  const [similarityType, setSimilarityType] = useState<'意近' | '形近'>('意近');
+  const [difference, setDifference] = useState('');
+  const [sourceExample, setSourceExample] = useState('');
+  const [targetExample, setTargetExample] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    setTargetName('');
+    setMeaning('');
+    setEmotion(t('neu'));
+    setRelType('SYNONYM');
+    setStrength(0.8);
+    setSimilarityType('意近');
+    setDifference('');
+    setSourceExample('');
+    setTargetExample('');
+    setSubmitting(false);
+    setError(null);
+  }, [isOpen, sourceNode, t]);
 
   if (!isOpen) return null;
 
@@ -40,7 +62,11 @@ export default function CustomExpandModal({ isOpen, onClose, sourceNode, onSubmi
     // This will create both nodes and the link between them.
     const relation: RelationshipDetail = {
       name: targetName.trim(),
-      strength: strength
+      strength,
+      similarityType: relType === 'SYNONYM' ? similarityType : undefined,
+      difference: relType === 'SYNONYM' ? difference.trim() : undefined,
+      sourceExample: relType === 'SYNONYM' ? sourceExample.trim() : undefined,
+      targetExample: relType === 'SYNONYM' ? targetExample.trim() : undefined,
     };
 
     const payload: IdiomResult = {
@@ -183,6 +209,71 @@ export default function CustomExpandModal({ isOpen, onClose, sourceNode, onSubmi
               className="w-full h-1.5 bg-muted rounded-lg appearance-none cursor-pointer accent-primary"
             />
           </div>
+
+          {relType === 'SYNONYM' && (
+            <>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  {t('similarityType')}
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(['意近', '形近'] as const).map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => setSimilarityType(type)}
+                      className={cn(
+                        "rounded-lg border px-3 py-2 text-sm transition-all",
+                        similarityType === type
+                          ? "border-primary bg-primary text-primary-foreground shadow-md"
+                          : "border-border bg-background hover:bg-muted"
+                      )}
+                    >
+                      {type === '意近' ? t('meaningSimilar') : t('shapeSimilar')}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  {t('difference')}
+                </label>
+                <textarea
+                  placeholder={t('differencePlaceholder')}
+                  value={difference}
+                  onChange={(e) => setDifference(e.target.value)}
+                  className="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm min-h-[76px] focus:ring-2 focus:ring-primary/20 transition-all outline-none resize-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    {t('sourceExample')}
+                  </label>
+                  <textarea
+                    placeholder={t('sourceExamplePlaceholder', { sourceIdiom: sourceNode })}
+                    value={sourceExample}
+                    onChange={(e) => setSourceExample(e.target.value)}
+                    className="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm min-h-[72px] focus:ring-2 focus:ring-primary/20 transition-all outline-none resize-none"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    {t('targetExample')}
+                  </label>
+                  <textarea
+                    placeholder={t('targetExamplePlaceholder', { targetIdiom: targetName.trim() || t('targetIdiom') })}
+                    value={targetExample}
+                    onChange={(e) => setTargetExample(e.target.value)}
+                    className="w-full bg-background border border-input rounded-lg px-3 py-2 text-sm min-h-[72px] focus:ring-2 focus:ring-primary/20 transition-all outline-none resize-none"
+                  />
+                </div>
+              </div>
+            </>
+          )}
 
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">

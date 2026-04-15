@@ -76,22 +76,26 @@ func ExtractIdiomRelations(ctx context.Context, text string) (*models.IdiomExtra
 		"你是一个中文成语解析引擎。请解析用户输入的成语，并以严格 JSON 返回以下字段：",
 		"- idiom: 成语本身",
 		"- meaning: 成语释义，简洁准确",
-		"- synonyms: 近义成语数组，每项为 {\"name\":\"成语\",\"strength\":0.0-1.0}",
-		"- antonyms: 反义成语数组，每项为 {\"name\":\"成语\",\"strength\":0.0-1.0}",
+		"- synonyms: 近义成语数组，只记录与当前成语容易混淆或语义相近的成语，包含“形近”与“意近”两类。每项为 {\"name\":\"成语\",\"strength\":0.0-1.0,\"similarityType\":\"形近|意近\",\"difference\":\"两个成语的关键区别\",\"sourceExample\":\"当前成语的简短例句\",\"targetExample\":\"该近义成语的简短例句\"}",
+		"- antonyms: 固定返回空数组 []",
 		"- examples: 例句数组，尽量返回 2 到 4 条不同用法或不同语境的例句。每项为 {\"usage\":\"用法说明\",\"sentence\":\"完整例句\",\"source\":\"来源名称\",\"sourceUrl\":\"文章链接\"}",
 		"- emotions: 情感色彩，例如褒义、贬义、中性",
 		"",
 		"规则：",
 		"1. 只返回 JSON，不要输出任何额外说明。",
 		"1.1 idiom 字段必须原样返回用户输入，不要改写，不要替换成问号。",
-		"2. examples 中的例句必须尽量体现不同用法、不同语境。",
-		"3. 例句来源必须限定为权威官方中文来源，优先使用人民网、人民日报、新华网、新华社及其官方站点。",
-		"4. source 和 sourceUrl 必须填写真实可核验的信息。",
-		"5. 如果无法确认例句确实来自上述权威来源，请返回空数组 examples: []。",
-		"6. 不要编造来源名称、文章标题或链接。",
-		"7. strength 需要反映语义接近或对立程度。",
-		"8. 对于常见的中文四字成语，默认按有效成语处理并正常解析，不要因为缺少上下文而判定为无效输入。",
-		"9. 只有在输入明显不是成语、或者完全不是中文时，才可以返回“无效输入”一类结果。",
+		"2. synonyms 只允许返回近义或易混淆成语，不要返回反义成语，也不要返回泛泛相关词。",
+		"3. similarityType 只能填写“形近”或“意近”，并选择最主要的一类。",
+		"4. difference 要聚焦两个成语最容易混淆的差别，尽量用一句话说清。",
+		"5. sourceExample 必须使用当前输入的成语，targetExample 必须使用对应近义成语，例句要自然简洁。",
+		"6. examples 中的例句必须尽量体现不同用法、不同语境。",
+		"7. 例句来源必须限定为权威官方中文来源，优先使用人民网、人民日报、新华网、新华社及其官方站点。",
+		"8. source 和 sourceUrl 必须填写真实可核验的信息。",
+		"9. 如果无法确认例句确实来自上述权威来源，请返回空数组 examples: []。",
+		"10. 不要编造来源名称、文章标题或链接。",
+		"11. strength 需要反映两个成语的接近程度，数值越大表示越容易混淆或越接近。",
+		"12. 对于常见的中文四字成语，默认按有效成语处理并正常解析，不要因为缺少上下文而判定为无效输入。",
+		"13. 只有在输入明显不是成语、或者完全不是中文时，才可以返回“无效输入”一类结果。",
 	}, "\n")
 
 	req := openai.ChatCompletionRequest{
@@ -127,15 +131,60 @@ func ExtractIdiomRelations(ctx context.Context, text string) (*models.IdiomExtra
 		return nil, fmt.Errorf("failed to parse JSON from LLM: %v", err)
 	}
 
-	if result.Synonyms == nil {
-		result.Synonyms = []models.RelationshipDetail{}
-	}
-	if result.Antonyms == nil {
-		result.Antonyms = []models.RelationshipDetail{}
-	}
+	result.Synonyms = normalizeRelationshipDetails(result.Synonyms)
+	result.Antonyms = []models.RelationshipDetail{}
 	result.Examples = EnsureAuthoritativeExamples(ctx, result.Idiom, result.Meaning, result.Examples)
 
 	return &result, nil
+}
+
+func normalizeRelationshipDetails(details []models.RelationshipDetail) []models.RelationshipDetail {
+	if len(details) == 0 {
+		return []models.RelationshipDetail{}
+	}
+
+	normalized := make([]models.RelationshipDetail, 0, len(details))
+	seen := make(map[string]struct{}, len(details))
+
+	for _, detail := range details {
+		name := strings.TrimSpace(detail.Name)
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+
+		detail.Name = name
+		detail.SimilarityType = normalizeSimilarityType(detail.SimilarityType)
+		detail.Difference = strings.TrimSpace(detail.Difference)
+		detail.SourceExample = strings.TrimSpace(detail.SourceExample)
+		detail.TargetExample = strings.TrimSpace(detail.TargetExample)
+
+		if detail.Strength < 0 {
+			detail.Strength = 0
+		}
+		if detail.Strength > 1 {
+			detail.Strength = 1
+		}
+
+		normalized = append(normalized, detail)
+	}
+
+	return normalized
+}
+
+func normalizeSimilarityType(value string) string {
+	similarityType := strings.TrimSpace(strings.ToLower(value))
+	switch {
+	case strings.Contains(similarityType, "形") || strings.Contains(similarityType, "shape") || strings.Contains(similarityType, "orth"):
+		return "形近"
+	case strings.Contains(similarityType, "意") || strings.Contains(similarityType, "mean") || strings.Contains(similarityType, "semantic"):
+		return "意近"
+	default:
+		return ""
+	}
 }
 
 func normalizeUsageExamples(examples []models.UsageExample) []models.UsageExample {

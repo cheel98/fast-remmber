@@ -164,12 +164,20 @@ func SaveIdiom(c *gin.Context) {
 					`MERGE (i:UserIdiom {owner: $owner, name: $idiom})
 					 MERGE (s:UserIdiom {owner: $owner, name: $syn})
 					 MERGE (i)-[r:SYNONYM]->(s)
-					 SET r.strength = $strength`,
+					 SET r.strength = $strength,
+					     r.similarityType = $similarityType,
+					     r.difference = $difference,
+					     r.sourceExample = $sourceExample,
+					     r.targetExample = $targetExample`,
 					map[string]any{
-						"owner":    user.Username,
-						"idiom":    body.Idiom,
-						"syn":      syn.Name,
-						"strength": syn.Strength,
+						"owner":          user.Username,
+						"idiom":          body.Idiom,
+						"syn":            syn.Name,
+						"strength":       syn.Strength,
+						"similarityType": syn.SimilarityType,
+						"difference":     syn.Difference,
+						"sourceExample":  syn.SourceExample,
+						"targetExample":  syn.TargetExample,
 					})
 				if err != nil {
 					return nil, err
@@ -182,12 +190,20 @@ func SaveIdiom(c *gin.Context) {
 					`MERGE (i:UserIdiom {owner: $owner, name: $idiom})
 					 MERGE (a:UserIdiom {owner: $owner, name: $ant})
 					 MERGE (i)-[r:ANTONYM]->(a)
-					 SET r.strength = $strength`,
+					 SET r.strength = $strength,
+					     r.similarityType = $similarityType,
+					     r.difference = $difference,
+					     r.sourceExample = $sourceExample,
+					     r.targetExample = $targetExample`,
 					map[string]any{
-						"owner":    user.Username,
-						"idiom":    body.Idiom,
-						"ant":      ant.Name,
-						"strength": ant.Strength,
+						"owner":          user.Username,
+						"idiom":          body.Idiom,
+						"ant":            ant.Name,
+						"strength":       ant.Strength,
+						"similarityType": ant.SimilarityType,
+						"difference":     ant.Difference,
+						"sourceExample":  ant.SourceExample,
+						"targetExample":  ant.TargetExample,
 					})
 				if err != nil {
 					return nil, err
@@ -232,7 +248,8 @@ func GetIdiomGraph(c *gin.Context) {
 			 WHERE n.name IS NOT NULL AND m.name IS NOT NULL
 			 RETURN n.name AS source, n.emotions AS sEmotion, n.meaning IS NOT NULL AS sExplained,
 			        m.name AS target, m.emotions AS tEmotion, m.meaning IS NOT NULL AS tExplained,
-			        type(r) AS label, r.strength AS strength LIMIT 200`,
+			        type(r) AS label, r.strength AS strength, r.similarityType AS similarityType,
+			        r.difference AS difference, r.sourceExample AS sourceExample, r.targetExample AS targetExample LIMIT 200`,
 			map[string]any{"owner": user.Username})
 		if err != nil {
 			return nil, err
@@ -255,6 +272,10 @@ func GetIdiomGraph(c *gin.Context) {
 			tExplained, _ := record.Get("tExplained")
 			label, _ := record.Get("label")
 			strength, _ := record.Get("strength")
+			similarityType, _ := record.Get("similarityType")
+			difference, _ := record.Get("difference")
+			sourceExample, _ := record.Get("sourceExample")
+			targetExample, _ := record.Get("targetExample")
 
 			srcStr := stringValue(source)
 			tgtStr := stringValue(target)
@@ -288,10 +309,14 @@ func GetIdiomGraph(c *gin.Context) {
 			}
 
 			graph.Links = append(graph.Links, models.GraphLink{
-				Source:   srcStr,
-				Target:   tgtStr,
-				Label:    labelStr,
-				Strength: float64Value(strength, 0.5),
+				Source:         srcStr,
+				Target:         tgtStr,
+				Label:          labelStr,
+				Strength:       float64Value(strength, 0.5),
+				SimilarityType: stringValue(similarityType),
+				Difference:     stringValue(difference),
+				SourceExample:  stringValue(sourceExample),
+				TargetExample:  stringValue(targetExample),
 			})
 		}
 
@@ -385,7 +410,10 @@ func GetIdiomDetail(c *gin.Context) {
 
 		// Fetch Synonyms
 		synRes, err := tx.Run(ctx,
-			"MATCH (i:UserIdiom {owner: $owner, name: $name})-[r:SYNONYM]->(s:UserIdiom {owner: $owner}) RETURN s.name AS name, r.strength AS strength, s.meaning IS NOT NULL AS hasAIExplore",
+			`MATCH (i:UserIdiom {owner: $owner, name: $name})-[r:SYNONYM]->(s:UserIdiom {owner: $owner})
+			 RETURN s.name AS name, r.strength AS strength, s.meaning IS NOT NULL AS hasAIExplore,
+			        r.similarityType AS similarityType, r.difference AS difference,
+			        r.sourceExample AS sourceExample, r.targetExample AS targetExample`,
 			map[string]any{"owner": user.Username, "name": name})
 		if err == nil {
 			for synRes.Next(ctx) {
@@ -393,21 +421,32 @@ func GetIdiomDetail(c *gin.Context) {
 				n, _ := rec.Get("name")
 				s, _ := rec.Get("strength")
 				h, _ := rec.Get("hasAIExplore")
+				similarityType, _ := rec.Get("similarityType")
+				difference, _ := rec.Get("difference")
+				sourceExample, _ := rec.Get("sourceExample")
+				targetExample, _ := rec.Get("targetExample")
 				name := stringValue(n)
 				if name == "" {
 					continue
 				}
 				idiomRes.Synonyms = append(idiomRes.Synonyms, models.RelationshipDetail{
-					Name:         name,
-					Strength:     float64Value(s, 0),
-					HasAIExplore: boolValue(h),
+					Name:           name,
+					Strength:       float64Value(s, 0),
+					SimilarityType: stringValue(similarityType),
+					Difference:     stringValue(difference),
+					SourceExample:  stringValue(sourceExample),
+					TargetExample:  stringValue(targetExample),
+					HasAIExplore:   boolValue(h),
 				})
 			}
 		}
 
 		// Fetch Antonyms
 		antRes, err := tx.Run(ctx,
-			"MATCH (i:UserIdiom {owner: $owner, name: $name})-[r:ANTONYM]->(a:UserIdiom {owner: $owner}) RETURN a.name AS name, r.strength AS strength, a.meaning IS NOT NULL AS hasAIExplore",
+			`MATCH (i:UserIdiom {owner: $owner, name: $name})-[r:ANTONYM]->(a:UserIdiom {owner: $owner})
+			 RETURN a.name AS name, r.strength AS strength, a.meaning IS NOT NULL AS hasAIExplore,
+			        r.similarityType AS similarityType, r.difference AS difference,
+			        r.sourceExample AS sourceExample, r.targetExample AS targetExample`,
 			map[string]any{"owner": user.Username, "name": name})
 		if err == nil {
 			for antRes.Next(ctx) {
@@ -415,14 +454,22 @@ func GetIdiomDetail(c *gin.Context) {
 				n, _ := rec.Get("name")
 				s, _ := rec.Get("strength")
 				h, _ := rec.Get("hasAIExplore")
+				similarityType, _ := rec.Get("similarityType")
+				difference, _ := rec.Get("difference")
+				sourceExample, _ := rec.Get("sourceExample")
+				targetExample, _ := rec.Get("targetExample")
 				name := stringValue(n)
 				if name == "" {
 					continue
 				}
 				idiomRes.Antonyms = append(idiomRes.Antonyms, models.RelationshipDetail{
-					Name:         name,
-					Strength:     float64Value(s, 0),
-					HasAIExplore: boolValue(h),
+					Name:           name,
+					Strength:       float64Value(s, 0),
+					SimilarityType: stringValue(similarityType),
+					Difference:     stringValue(difference),
+					SourceExample:  stringValue(sourceExample),
+					TargetExample:  stringValue(targetExample),
+					HasAIExplore:   boolValue(h),
 				})
 			}
 		}
@@ -491,13 +538,21 @@ func AssociateIdioms(c *gin.Context) {
 				`MATCH (s:UserIdiom {owner: $owner, name: $source})
 				 MATCH (t:UserIdiom {owner: $owner, name: $target})
 				 MERGE (s)-[r:`+req.Label+`]->(t)
-				 SET r.strength = $strength
+				 SET r.strength = $strength,
+				     r.similarityType = $similarityType,
+				     r.difference = $difference,
+				     r.sourceExample = $sourceExample,
+				     r.targetExample = $targetExample
 				 RETURN r`,
 				map[string]any{
-					"owner":    user.Username,
-					"source":   req.Source,
-					"target":   req.Target,
-					"strength": req.Strength,
+					"owner":          user.Username,
+					"source":         req.Source,
+					"target":         req.Target,
+					"strength":       req.Strength,
+					"similarityType": req.SimilarityType,
+					"difference":     req.Difference,
+					"sourceExample":  req.SourceExample,
+					"targetExample":  req.TargetExample,
 				})
 			return nil, err
 		})

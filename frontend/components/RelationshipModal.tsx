@@ -30,7 +30,18 @@ interface RelationshipModalProps {
   targetId: string;
   initialLabel?: string;
   initialStrength?: number;
-  onSubmit: (data: { label: string; strength: number }) => Promise<void>;
+  initialSimilarityType?: string;
+  initialDifference?: string;
+  initialSourceExample?: string;
+  initialTargetExample?: string;
+  onSubmit: (data: {
+    label: string;
+    strength: number;
+    similarityType?: string;
+    difference?: string;
+    sourceExample?: string;
+    targetExample?: string;
+  }) => Promise<void>;
   onDelete?: () => Promise<void>;
 }
 
@@ -41,6 +52,10 @@ export default function RelationshipModal({
   targetId,
   initialLabel = 'RELATED',
   initialStrength = 0.5,
+  initialSimilarityType = '意近',
+  initialDifference = '',
+  initialSourceExample = '',
+  initialTargetExample = '',
   onSubmit,
   onDelete,
 }: RelationshipModalProps) {
@@ -49,6 +64,10 @@ export default function RelationshipModal({
   const tGraph = useTranslations('IdiomGraph'); // For labels like SYNONYM
   const [label, setLabel] = useState(initialLabel);
   const [strength, setStrength] = useState(initialStrength);
+  const [similarityType, setSimilarityType] = useState(initialSimilarityType);
+  const [difference, setDifference] = useState(initialDifference);
+  const [sourceExample, setSourceExample] = useState(initialSourceExample);
+  const [targetExample, setTargetExample] = useState(initialTargetExample);
   const [loading, setLoading] = useState(false);
 
   // Sync state when initial values change (e.g. when opening for a different link)
@@ -56,13 +75,32 @@ export default function RelationshipModal({
     if (isOpen) {
       setLabel(initialLabel);
       setStrength(initialStrength);
+      setSimilarityType(initialSimilarityType || '意近');
+      setDifference(initialDifference || '');
+      setSourceExample(initialSourceExample || '');
+      setTargetExample(initialTargetExample || '');
     }
-  }, [isOpen, initialLabel, initialStrength]);
+  }, [
+    isOpen,
+    initialLabel,
+    initialStrength,
+    initialSimilarityType,
+    initialDifference,
+    initialSourceExample,
+    initialTargetExample,
+  ]);
 
   const handleSubmit = async () => {
     setLoading(true);
     try {
-      await onSubmit({ label, strength });
+      await onSubmit({
+        label,
+        strength,
+        similarityType: label === 'SYNONYM' ? similarityType : '',
+        difference: label === 'SYNONYM' ? difference.trim() : '',
+        sourceExample: label === 'SYNONYM' ? sourceExample.trim() : '',
+        targetExample: label === 'SYNONYM' ? targetExample.trim() : '',
+      });
       onClose();
     } catch (error) {
       console.error('Failed to save association:', error);
@@ -140,6 +178,64 @@ export default function RelationshipModal({
               {t('strengthDesc')}
             </p>
           </div>
+
+          {label === 'SYNONYM' && (
+            <>
+              <div className="grid gap-2">
+                <Label htmlFor="similarity-type" className="text-sm font-medium">
+                  {t('similarityType')}
+                </Label>
+                <Select value={similarityType || '意近'} onValueChange={setSimilarityType}>
+                  <SelectTrigger id="similarity-type" className="w-full bg-muted/30 border-white/5">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-popover/90 backdrop-blur-lg border-white/10">
+                    <SelectItem value="意近">{t('meaningSimilar')}</SelectItem>
+                    <SelectItem value="形近">{t('shapeSimilar')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="difference" className="text-sm font-medium">
+                  {t('difference')}
+                </Label>
+                <textarea
+                  id="difference"
+                  value={difference}
+                  onChange={(event) => setDifference(event.target.value)}
+                  placeholder={t('differencePlaceholder')}
+                  className="min-h-[84px] w-full rounded-md border border-input bg-muted/30 px-3 py-2 text-sm outline-none transition-colors focus:border-primary"
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="source-example" className="text-sm font-medium">
+                  {t('sourceExample')}
+                </Label>
+                <textarea
+                  id="source-example"
+                  value={sourceExample}
+                  onChange={(event) => setSourceExample(event.target.value)}
+                  placeholder={t('sourceExamplePlaceholder', { sourceId })}
+                  className="min-h-[72px] w-full rounded-md border border-input bg-muted/30 px-3 py-2 text-sm outline-none transition-colors focus:border-primary"
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="target-example" className="text-sm font-medium">
+                  {t('targetExample')}
+                </Label>
+                <textarea
+                  id="target-example"
+                  value={targetExample}
+                  onChange={(event) => setTargetExample(event.target.value)}
+                  placeholder={t('targetExamplePlaceholder', { targetId })}
+                  className="min-h-[72px] w-full rounded-md border border-input bg-muted/30 px-3 py-2 text-sm outline-none transition-colors focus:border-primary"
+                />
+              </div>
+            </>
+          )}
         </div>
 
         <DialogFooter className="gap-2 sm:gap-0 sm:justify-between items-center">

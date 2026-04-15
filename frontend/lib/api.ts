@@ -4,6 +4,10 @@ const AUTH_TOKEN_KEY = 'fast-remmber-auth-token';
 export interface RelationshipDetail {
   name: string;
   strength: number;
+  similarityType?: string;
+  difference?: string;
+  sourceExample?: string;
+  targetExample?: string;
   hasAIExplore?: boolean;
 }
 
@@ -39,6 +43,10 @@ export interface GraphLink {
   target: string;
   label: string;
   strength: number;
+  similarityType?: string;
+  difference?: string;
+  sourceExample?: string;
+  targetExample?: string;
 }
 
 export interface GraphData {
@@ -227,12 +235,18 @@ export const fetchGraph = async (): Promise<GraphData> => {
   return data;
 };
 
-export const associateIdioms = async (source: string, target: string, label: string = 'RELATED', strength: number = 1.0): Promise<void> => {
+export const associateIdioms = async (
+  source: string,
+  target: string,
+  label: string = 'RELATED',
+  strength: number = 1.0,
+  details?: Omit<RelationshipDetail, 'name' | 'strength' | 'hasAIExplore'>,
+): Promise<void> => {
   await request(
     '/associate',
     {
       method: 'POST',
-      body: JSON.stringify({ source, target, label, strength }),
+      body: JSON.stringify({ source, target, label, strength, ...details }),
     },
     'Failed to create association',
     { requireAuth: true, includeJsonContentType: true },

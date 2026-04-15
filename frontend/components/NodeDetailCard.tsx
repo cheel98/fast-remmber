@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { X, BookOpen, TrendingUp, TrendingDown, Activity, Smile, Frown, Meh } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { IdiomResult, fetchIdiomDetail } from '@/lib/api';
 import UsageExamples from '@/components/UsageExamples';
+import RelatedIdiomCard from '@/components/RelatedIdiomCard';
 import { cn } from '@/lib/utils';
 
 interface NodeDetailCardProps {
@@ -28,12 +29,40 @@ export default function NodeDetailCard({
 }: NodeDetailCardProps) {
   const t = useTranslations('HomePage');
   const tCommon = useTranslations('Common');
+  const cardRef = useRef<HTMLDivElement>(null);
+  const isDraggingRef = useRef(false);
   const [data, setData] = useState<IdiomResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [position, setPosition] = useState({ left: x + 20, top: y - 20 });
+  const [hasManualPosition, setHasManualPosition] = useState(false);
+  const [dragState, setDragState] = useState<{
+    isDragging: boolean;
+    offsetX: number;
+    offsetY: number;
+  }>({
+    isDragging: false,
+    offsetX: 0,
+    offsetY: 0,
+  });
+
+  const getRelativePosition = (clientX: number, clientY: number, offsetX: number, offsetY: number) => {
+    const offsetParent = cardRef.current?.offsetParent;
+    const parentRect = offsetParent instanceof HTMLElement
+      ? offsetParent.getBoundingClientRect()
+      : { left: 0, top: 0 };
+
+    return {
+      left: clientX - parentRect.left - offsetX,
+      top: clientY - parentRect.top - offsetY,
+    };
+  };
+
+  const anchorPosition = { left: x + 20, top: y - 20 };
 
   useEffect(() => {
     setLoading(true);
+    setError(null);
     fetchIdiomDetail(idiomName)
       .then(res => {
         setData(res);
@@ -45,19 +74,113 @@ export default function NodeDetailCard({
       });
   }, [idiomName]);
 
+  useEffect(() => {
+    setHasManualPosition(false);
+    setPosition(anchorPosition);
+  }, [idiomName]);
+
+  useEffect(() => {
+    if (hasManualPosition) {
+      return;
+    }
+
+    setPosition(anchorPosition);
+  }, [anchorPosition.left, anchorPosition.top, hasManualPosition]);
+
+  useEffect(() => {
+    if (!dragState.isDragging) {
+      return;
+    }
+
+    const handlePointerMove = (event: PointerEvent) => {
+      setPosition(getRelativePosition(
+        event.clientX,
+        event.clientY,
+        dragState.offsetX,
+        dragState.offsetY,
+      ));
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      isDraggingRef.current = false;
+      setDragState((current) => ({ ...current, isDragging: false }));
+
+      if (!onMouseLeave || !cardRef.current) {
+        return;
+      }
+
+      const target = document.elementFromPoint(event.clientX, event.clientY);
+      if (!target || !cardRef.current.contains(target)) {
+        onMouseLeave();
+      }
+    };
+
+    document.body.style.userSelect = 'none';
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+
+    return () => {
+      document.body.style.userSelect = '';
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+  }, [dragState, isHover]);
+
+  const handleDragStart = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!cardRef.current) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('[data-no-drag="true"]')) {
+      return;
+    }
+
+    const rect = cardRef.current.getBoundingClientRect();
+    isDraggingRef.current = true;
+    onMouseEnter?.();
+    setHasManualPosition(true);
+    setDragState({
+      isDragging: true,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+    });
+  };
+  const cardStyle = { left: position.left, top: position.top };
+  const handleCardMouseEnter = () => {
+    onMouseEnter?.();
+  };
+  const handleCardMouseLeave = () => {
+    if (isDraggingRef.current) {
+      return;
+    }
+
+    onMouseLeave?.();
+  };
+
   if (loading) {
     return (
       <div 
+        ref={cardRef}
         className={cn(
           "absolute z-[60] bg-background/95 backdrop-blur-md border border-border shadow-2xl rounded-2xl p-4 w-64 animate-in fade-in zoom-in-95 duration-200",
           "pointer-events-auto"
         )}
-        style={{ left: x + 20, top: y - 20 }}
-        onMouseEnter={onMouseEnter}
-        onMouseLeave={onMouseLeave}
+        style={cardStyle}
+        onMouseEnter={handleCardMouseEnter}
+        onMouseLeave={handleCardMouseLeave}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-2 text-muted-foreground animate-pulse">
+        <div
+          className={cn(
+            "flex items-center gap-2 text-muted-foreground animate-pulse",
+            "cursor-grab active:cursor-grabbing touch-none"
+          )}
+          onPointerDown={handleDragStart}
+        >
           <div className="h-4 w-4 bg-muted rounded-full" />
           <div className="h-4 w-32 bg-muted rounded" />
           <span className="text-[10px] ml-1">{t('loadingDetails')}</span>
@@ -69,16 +192,25 @@ export default function NodeDetailCard({
   if (error || !data) {
     return (
       <div 
+        ref={cardRef}
         className={cn(
           "absolute z-[60] bg-background/95 backdrop-blur-md border border-destructive/50 shadow-2xl rounded-2xl p-4 w-64 animate-in fade-in zoom-in-95 duration-200",
           "pointer-events-auto"
         )}
-        style={{ left: x + 20, top: y - 20 }}
-        onMouseEnter={onMouseEnter}
-        onMouseLeave={onMouseLeave}
+        style={cardStyle}
+        onMouseEnter={handleCardMouseEnter}
+        onMouseLeave={handleCardMouseLeave}
         onClick={(e) => e.stopPropagation()}
       >
-        <p className="text-xs text-destructive font-medium">{error || t('notFound')}</p>
+        <div
+          className={cn(
+            "mb-2 text-xs text-destructive font-medium",
+            "cursor-grab active:cursor-grabbing touch-none"
+          )}
+          onPointerDown={handleDragStart}
+        >
+          {error || t('notFound')}
+        </div>
         {!isHover && <button onClick={onClose} className="mt-2 text-[10px] text-muted-foreground hover:underline">{tCommon('cancel')}</button>}
       </div>
     );
@@ -86,22 +218,34 @@ export default function NodeDetailCard({
 
   return (
     <div 
+      ref={cardRef}
       className={cn(
         "absolute z-[60] bg-background/95 backdrop-blur-xl border border-border/50 shadow-2xl rounded-2xl w-72 overflow-hidden animate-in fade-in slide-in-from-left-2 duration-300 pointer-events-auto"
       )}
-      style={{ left: x + 20, top: y - 20 }}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
+      style={cardStyle}
+      onMouseEnter={handleCardMouseEnter}
+      onMouseLeave={handleCardMouseLeave}
       onClick={(e) => e.stopPropagation()}
     >
       {/* Header */}
-      <div className="px-4 py-3 bg-gradient-to-r from-primary/10 to-transparent border-b border-border/50 flex justify-between items-center">
+      <div
+        className={cn(
+          "px-4 py-3 bg-gradient-to-r from-primary/10 to-transparent border-b border-border/50 flex justify-between items-center",
+          "cursor-grab active:cursor-grabbing touch-none"
+        )}
+        onPointerDown={handleDragStart}
+      >
         <div className="flex items-center gap-2">
           <BookOpen className="h-4 w-4 text-primary" />
           <span className="font-bold text-sm tracking-tight">{data.idiom}</span>
         </div>
         {!isHover && (
-          <button onClick={onClose} className="p-1 hover:bg-muted rounded-full transition-colors">
+          <button
+            onClick={onClose}
+            onPointerDown={(event) => event.stopPropagation()}
+            data-no-drag="true"
+            className="p-1 hover:bg-muted rounded-full transition-colors"
+          >
             <X className="h-3 w-3 text-muted-foreground" />
           </button>
         )}
@@ -145,11 +289,15 @@ export default function NodeDetailCard({
               <TrendingUp className="h-3 w-3 text-emerald-500" />
               <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">{t('synonyms')}</span>
             </div>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="space-y-2">
               {data.synonyms.map(syn => (
-                <span key={syn.name} className="px-2 py-0.5 bg-muted/50 border border-border/50 rounded-md text-[10px] font-medium text-foreground/80 hover:bg-muted transition-colors">
-                  {syn.name}
-                </span>
+                <RelatedIdiomCard
+                  key={syn.name}
+                  relation={syn}
+                  sourceIdiom={data.idiom}
+                  tone="synonym"
+                  compact
+                />
               ))}
             </div>
           </div>
@@ -162,11 +310,15 @@ export default function NodeDetailCard({
               <TrendingDown className="h-3 w-3 text-rose-500" />
               <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">{t('antonyms')}</span>
             </div>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="space-y-2">
               {data.antonyms.map(ant => (
-                <span key={ant.name} className="px-2 py-0.5 bg-muted/50 border border-border/50 rounded-md text-[10px] font-medium text-foreground/80 hover:bg-muted transition-colors">
-                  {ant.name}
-                </span>
+                <RelatedIdiomCard
+                  key={ant.name}
+                  relation={ant}
+                  sourceIdiom={data.idiom}
+                  tone="antonym"
+                  compact
+                />
               ))}
             </div>
           </div>
