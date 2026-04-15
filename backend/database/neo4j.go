@@ -34,6 +34,12 @@ func InitNeo4j() error {
 	if err := ensureConstraints(ctx); err != nil {
 		return err
 	}
+	if err := ensureSeedTemplate(ctx); err != nil {
+		return err
+	}
+	if err := EnsureSeedGraphsForExistingUsers(ctx); err != nil {
+		return err
+	}
 
 	log.Println("Connected to Neo4j successfully")
 	return nil

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"fast-remmber-backend/database"
 	"fast-remmber-backend/models"
@@ -249,93 +251,18 @@ func GetIdiomGraph(c *gin.Context) {
 		return
 	}
 
+	if err := database.EnsureUserSeedGraph(c.Request.Context(), user.Username); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to prepare seeded graph: " + err.Error()})
+		return
+	}
+
 	ctx := context.Background()
 	session := database.Driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
 	defer session.Close(ctx)
 
+	options := parseGraphQueryOptions(c)
 	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		res, err := tx.Run(ctx,
-			`MATCH (n:UserIdiom {owner: $owner})-[r]->(m:UserIdiom {owner: $owner})
-			 WHERE n.name IS NOT NULL AND m.name IS NOT NULL
-			 RETURN n.name AS source, n.emotions AS sEmotion, n.meaning IS NOT NULL AS sExplained,
-			        m.name AS target, m.emotions AS tEmotion, m.meaning IS NOT NULL AS tExplained,
-			        type(r) AS label, r.strength AS strength, r.similarityType AS similarityType,
-			        r.difference AS difference, r.sourceExample AS sourceExample, r.targetExample AS targetExample LIMIT 200`,
-			map[string]any{"owner": user.Username})
-		if err != nil {
-			return nil, err
-		}
-
-		graph := models.GraphData{
-			Nodes: []models.GraphNode{},
-			Links: []models.GraphLink{},
-		}
-
-		nodeMap := make(map[string]*models.GraphNode)
-
-		for res.Next(ctx) {
-			record := res.Record()
-			source, _ := record.Get("source")
-			sEmotion, _ := record.Get("sEmotion")
-			sExplained, _ := record.Get("sExplained")
-			target, _ := record.Get("target")
-			tEmotion, _ := record.Get("tEmotion")
-			tExplained, _ := record.Get("tExplained")
-			label, _ := record.Get("label")
-			strength, _ := record.Get("strength")
-			similarityType, _ := record.Get("similarityType")
-			difference, _ := record.Get("difference")
-			sourceExample, _ := record.Get("sourceExample")
-			targetExample, _ := record.Get("targetExample")
-
-			srcStr := stringValue(source)
-			tgtStr := stringValue(target)
-			if srcStr == "" || tgtStr == "" {
-				continue
-			}
-
-			// Helper to add or update node
-			updateNode := func(id string, emotion any, explained any) {
-				emoStr := stringValue(emotion)
-				isExplained := boolValue(explained)
-				if node, exists := nodeMap[id]; !exists {
-					nodeMap[id] = &models.GraphNode{ID: id, Label: id, Type: "Idiom", Emotion: emoStr, HasMeaning: isExplained}
-				} else {
-					if node.Emotion == "" && emoStr != "" {
-						node.Emotion = emoStr
-					}
-					// If we find evidence that it's explained, update it
-					if isExplained {
-						node.HasMeaning = true
-					}
-				}
-			}
-
-			updateNode(srcStr, sEmotion, sExplained)
-			updateNode(tgtStr, tEmotion, tExplained)
-
-			labelStr := stringValue(label)
-			if labelStr == "" {
-				labelStr = "RELATED"
-			}
-
-			graph.Links = append(graph.Links, models.GraphLink{
-				Source:         srcStr,
-				Target:         tgtStr,
-				Label:          labelStr,
-				Strength:       float64Value(strength, 0.5),
-				SimilarityType: stringValue(similarityType),
-				Difference:     stringValue(difference),
-				SourceExample:  stringValue(sourceExample),
-				TargetExample:  stringValue(targetExample),
-			})
-		}
-
-		// Transfer nodes from map to slice
-		for _, node := range nodeMap {
-			graph.Nodes = append(graph.Nodes, *node)
-		}
-		return graph, nil
+		return loadGraphData(ctx, tx, user.Username, options)
 	})
 
 	if err != nil {
@@ -344,6 +271,405 @@ func GetIdiomGraph(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, result)
+}
+
+type graphQueryOptions struct {
+	Mode   string
+	Center string
+	Depth  int
+	Limit  int
+	Labels []string
+}
+
+type graphNodeRow struct {
+	Name      string
+	Emotion   string
+	Explained bool
+	Degree    int
+}
+
+func parseGraphQueryOptions(c *gin.Context) graphQueryOptions {
+	mode := strings.TrimSpace(strings.ToLower(c.Query("mode")))
+	if mode != "focus" {
+		mode = "overview"
+	}
+
+	center := strings.TrimSpace(c.Query("center"))
+	if center == "" && mode == "focus" {
+		mode = "overview"
+	}
+
+	depth := 1
+	if mode == "overview" {
+		depth = 0
+	}
+	if rawDepth := strings.TrimSpace(c.Query("depth")); rawDepth != "" {
+		if parsedDepth, err := strconv.Atoi(rawDepth); err == nil {
+			if parsedDepth < 0 {
+				parsedDepth = 0
+			}
+			if parsedDepth > 2 {
+				parsedDepth = 2
+			}
+			depth = parsedDepth
+		}
+	}
+
+	limit := 300
+	if rawLimit := strings.TrimSpace(c.Query("limit")); rawLimit != "" {
+		if parsedLimit, err := strconv.Atoi(rawLimit); err == nil {
+			if parsedLimit < 20 {
+				parsedLimit = 20
+			}
+			if parsedLimit > 800 {
+				parsedLimit = 800
+			}
+			limit = parsedLimit
+		}
+	}
+
+	labels := parseGraphLabels(c.Query("labels"))
+
+	return graphQueryOptions{
+		Mode:   mode,
+		Center: center,
+		Depth:  depth,
+		Limit:  limit,
+		Labels: labels,
+	}
+}
+
+func parseGraphLabels(raw string) []string {
+	allowed := map[string]bool{
+		"SYNONYM": true,
+		"ANTONYM": true,
+		"RELATED": true,
+		"ANALOGY": true,
+	}
+
+	if strings.TrimSpace(raw) == "" {
+		return []string{"SYNONYM", "ANTONYM", "RELATED", "ANALOGY"}
+	}
+
+	labels := make([]string, 0)
+	seen := make(map[string]bool)
+	for _, part := range strings.Split(raw, ",") {
+		label := strings.ToUpper(strings.TrimSpace(part))
+		if !allowed[label] || seen[label] {
+			continue
+		}
+		seen[label] = true
+		labels = append(labels, label)
+	}
+
+	if len(labels) == 0 {
+		return []string{"SYNONYM", "ANTONYM", "RELATED", "ANALOGY"}
+	}
+
+	return labels
+}
+
+func loadGraphData(ctx context.Context, tx neo4j.ManagedTransaction, owner string, options graphQueryOptions) (models.GraphData, error) {
+	if options.Mode == "focus" {
+		return loadFocusedGraphData(ctx, tx, owner, options)
+	}
+	return loadOverviewGraphData(ctx, tx, owner, options)
+}
+
+func loadOverviewGraphData(ctx context.Context, tx neo4j.ManagedTransaction, owner string, options graphQueryOptions) (models.GraphData, error) {
+	selectedNodes, err := fetchOverviewNodes(ctx, tx, owner, options.Limit, options.Labels)
+	if err != nil {
+		return models.GraphData{}, err
+	}
+	if len(selectedNodes) == 0 {
+		return models.GraphData{Nodes: []models.GraphNode{}, Links: []models.GraphLink{}}, nil
+	}
+
+	names := make([]string, 0, len(selectedNodes))
+	for _, node := range selectedNodes {
+		names = append(names, node.Name)
+	}
+
+	links, err := fetchLinksWithinNames(ctx, tx, owner, names, options.Labels, options.Limit*4)
+	if err != nil {
+		return models.GraphData{}, err
+	}
+
+	return buildGraphData(selectedNodes, links), nil
+}
+
+func loadFocusedGraphData(ctx context.Context, tx neo4j.ManagedTransaction, owner string, options graphQueryOptions) (models.GraphData, error) {
+	names, err := fetchFocusedNodeNames(ctx, tx, owner, options.Center, options.Depth, options.Limit, options.Labels)
+	if err != nil {
+		return models.GraphData{}, err
+	}
+	if len(names) == 0 {
+		return models.GraphData{Nodes: []models.GraphNode{}, Links: []models.GraphLink{}}, nil
+	}
+
+	nodes, err := fetchNodesByNames(ctx, tx, owner, names)
+	if err != nil {
+		return models.GraphData{}, err
+	}
+
+	links, err := fetchLinksWithinNames(ctx, tx, owner, names, options.Labels, options.Limit*6)
+	if err != nil {
+		return models.GraphData{}, err
+	}
+
+	return buildGraphData(nodes, links), nil
+}
+
+func fetchOverviewNodes(ctx context.Context, tx neo4j.ManagedTransaction, owner string, limit int, labels []string) ([]graphNodeRow, error) {
+	result, err := tx.Run(ctx,
+		`MATCH (n:UserIdiom {owner: $owner})
+		 OPTIONAL MATCH (n)-[r1]->(:UserIdiom {owner: $owner})
+		 WHERE type(r1) IN $labels
+		 WITH n, count(r1) AS outDegree
+		 OPTIONAL MATCH (:UserIdiom {owner: $owner})-[r2]->(n)
+		 WHERE type(r2) IN $labels
+		 RETURN n.name AS name,
+		        n.emotions AS emotion,
+		        n.meaning IS NOT NULL AS explained,
+		        outDegree + count(r2) AS degree
+		 ORDER BY degree DESC, name ASC
+		 LIMIT $limit`,
+		map[string]any{
+			"owner":  owner,
+			"labels": labels,
+			"limit":  limit,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	rows := make([]graphNodeRow, 0)
+	for result.Next(ctx) {
+		record := result.Record()
+		name, _ := record.Get("name")
+		nameStr := stringValue(name)
+		if nameStr == "" {
+			continue
+		}
+
+		emotion, _ := record.Get("emotion")
+		explained, _ := record.Get("explained")
+		degree, _ := record.Get("degree")
+
+		rows = append(rows, graphNodeRow{
+			Name:      nameStr,
+			Emotion:   stringValue(emotion),
+			Explained: boolValue(explained),
+			Degree:    intValue(degree, 0),
+		})
+	}
+
+	return rows, result.Err()
+}
+
+func fetchFocusedNodeNames(ctx context.Context, tx neo4j.ManagedTransaction, owner string, center string, depth int, limit int, labels []string) ([]string, error) {
+	if center == "" {
+		return nil, nil
+	}
+
+	centerNodes, err := fetchNodesByNames(ctx, tx, owner, []string{center})
+	if err != nil {
+		return nil, err
+	}
+	if len(centerNodes) == 0 {
+		return nil, nil
+	}
+
+	seen := map[string]bool{center: true}
+	orderedNames := []string{center}
+	if depth <= 0 {
+		return orderedNames, nil
+	}
+
+	frontier := []string{center}
+	for hop := 0; hop < depth; hop++ {
+		if len(frontier) == 0 || len(orderedNames) >= limit {
+			break
+		}
+
+		res, err := tx.Run(ctx,
+			`MATCH (n:UserIdiom {owner: $owner})-[r]-(neighbor:UserIdiom {owner: $owner})
+			 WHERE n.name IN $frontier AND type(r) IN $labels
+			 RETURN DISTINCT neighbor.name AS name
+			 ORDER BY name ASC
+			 LIMIT $limit`,
+			map[string]any{
+				"owner":    owner,
+				"frontier": frontier,
+				"labels":   labels,
+				"limit":    limit * 4,
+			},
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		nextFrontier := make([]string, 0)
+		for res.Next(ctx) {
+			nameValue, _ := res.Record().Get("name")
+			name := stringValue(nameValue)
+			if name == "" || seen[name] {
+				continue
+			}
+
+			seen[name] = true
+			orderedNames = append(orderedNames, name)
+			nextFrontier = append(nextFrontier, name)
+			if len(orderedNames) >= limit {
+				break
+			}
+		}
+		if err := res.Err(); err != nil {
+			return nil, err
+		}
+
+		frontier = nextFrontier
+	}
+
+	return orderedNames, nil
+}
+
+func fetchNodesByNames(ctx context.Context, tx neo4j.ManagedTransaction, owner string, names []string) ([]graphNodeRow, error) {
+	if len(names) == 0 {
+		return []graphNodeRow{}, nil
+	}
+
+	res, err := tx.Run(ctx,
+		`MATCH (n:UserIdiom {owner: $owner})
+		 WHERE n.name IN $names
+		 RETURN n.name AS name, n.emotions AS emotion, n.meaning IS NOT NULL AS explained
+		 ORDER BY name ASC`,
+		map[string]any{
+			"owner": owner,
+			"names": names,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	rows := make([]graphNodeRow, 0, len(names))
+	for res.Next(ctx) {
+		record := res.Record()
+		name, _ := record.Get("name")
+		nameStr := stringValue(name)
+		if nameStr == "" {
+			continue
+		}
+
+		emotion, _ := record.Get("emotion")
+		explained, _ := record.Get("explained")
+
+		rows = append(rows, graphNodeRow{
+			Name:      nameStr,
+			Emotion:   stringValue(emotion),
+			Explained: boolValue(explained),
+		})
+	}
+
+	return rows, res.Err()
+}
+
+func fetchLinksWithinNames(ctx context.Context, tx neo4j.ManagedTransaction, owner string, names []string, labels []string, limit int) ([]models.GraphLink, error) {
+	if len(names) == 0 {
+		return []models.GraphLink{}, nil
+	}
+
+	res, err := tx.Run(ctx,
+		`MATCH (s:UserIdiom {owner: $owner})-[r]->(t:UserIdiom {owner: $owner})
+		 WHERE s.name IN $names
+		   AND t.name IN $names
+		   AND type(r) IN $labels
+		 RETURN s.name AS source,
+		        t.name AS target,
+		        type(r) AS label,
+		        r.strength AS strength,
+		        r.similarityType AS similarityType,
+		        r.difference AS difference,
+		        r.sourceExample AS sourceExample,
+		        r.targetExample AS targetExample
+		 LIMIT $limit`,
+		map[string]any{
+			"owner":  owner,
+			"names":  names,
+			"labels": labels,
+			"limit":  limit,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	links := make([]models.GraphLink, 0)
+	for res.Next(ctx) {
+		record := res.Record()
+		source, _ := record.Get("source")
+		target, _ := record.Get("target")
+		label, _ := record.Get("label")
+		strength, _ := record.Get("strength")
+		similarityType, _ := record.Get("similarityType")
+		difference, _ := record.Get("difference")
+		sourceExample, _ := record.Get("sourceExample")
+		targetExample, _ := record.Get("targetExample")
+
+		sourceStr := stringValue(source)
+		targetStr := stringValue(target)
+		if sourceStr == "" || targetStr == "" {
+			continue
+		}
+
+		links = append(links, models.GraphLink{
+			Source:         sourceStr,
+			Target:         targetStr,
+			Label:          stringValue(label),
+			Strength:       float64Value(strength, 0.5),
+			SimilarityType: stringValue(similarityType),
+			Difference:     stringValue(difference),
+			SourceExample:  stringValue(sourceExample),
+			TargetExample:  stringValue(targetExample),
+		})
+	}
+
+	return links, res.Err()
+}
+
+func buildGraphData(nodeRows []graphNodeRow, links []models.GraphLink) models.GraphData {
+	graph := models.GraphData{
+		Nodes: []models.GraphNode{},
+		Links: links,
+	}
+
+	degreeMap := make(map[string]int)
+	for _, link := range links {
+		degreeMap[link.Source]++
+		degreeMap[link.Target]++
+	}
+
+	for _, row := range nodeRows {
+		graph.Nodes = append(graph.Nodes, models.GraphNode{
+			ID:         row.Name,
+			Label:      row.Name,
+			Type:       "Idiom",
+			Emotion:    row.Emotion,
+			HasMeaning: row.Explained,
+			Degree:     maxInt(row.Degree, degreeMap[row.Name]),
+		})
+	}
+
+	return graph
+}
+
+func maxInt(left int, right int) int {
+	if left > right {
+		return left
+	}
+	return right
 }
 
 func GetIdiomDetail(c *gin.Context) {

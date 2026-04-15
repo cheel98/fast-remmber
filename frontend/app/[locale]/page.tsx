@@ -1,23 +1,37 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Search, Loader2, Save, ChevronLeft, Menu, Compass, Pencil, X, Check, Trash2, BookOpen, Activity, TrendingUp, TrendingDown, Smile, Frown, Meh, Plus, Minus, Pin, PinOff } from 'lucide-react';
+import { Search, Loader2, Save, ChevronLeft, Menu, Compass, Pencil, X, Check, Trash2, BookOpen, Activity, TrendingUp, TrendingDown, Smile, Frown, Meh, Plus, Minus } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLocale, useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import IdiomGraph from '@/components/IdiomGraph';
 import LanguageSwitcher from '@/components/LanguageSwitcher';
 import { SkinToggle } from '@/components/skin-toggle';
+import { AppSettingsSheet } from '@/components/app-settings-sheet';
 import UsageExamples from '@/components/UsageExamples';
 import RelatedIdiomCard from '@/components/RelatedIdiomCard';
 import AuthPanel from '@/components/AuthPanel';
 import DiscoveryHistory from '@/components/DiscoveryHistory';
 import UserBalanceBubble from '@/components/UserBalanceBubble';
-import { analyzeIdiom, saveIdiom, IdiomResult, fetchIdiomDetail, deleteIdiom, loginUser, registerUser, fetchCurrentUser, fetchDiscoveryHistory, clearStoredAuthToken, setStoredAuthToken, getStoredAuthToken, AuthUser, DiscoveryRecord } from '@/lib/api';
+import { analyzeIdiom, saveIdiom, IdiomResult, fetchIdiomDetail, deleteIdiom, loginUser, registerUser, fetchCurrentUser, fetchDiscoveryHistory, clearStoredAuthToken, setStoredAuthToken, getStoredAuthToken, AuthUser, DiscoveryRecord, GraphRelationLabel } from '@/lib/api';
 
 type AuthMode = 'login' | 'register';
 type Tone = 'positive' | 'negative' | 'neutral';
 type RelationAction = 'saved' | 'add' | 'remove' | 'idle';
+type GraphViewMode = 'overview' | 'focused' | 'expanded';
+type GraphLabelVisibility = 'focus' | 'important' | 'all';
+type UserPreferences = {
+  isGraphPinned: boolean;
+  labelVisibility: GraphLabelVisibility;
+  defaultDepth: 0 | 1 | 2;
+  nodeLimit: 100 | 300 | 800;
+  relationFilters: GraphRelationLabel[];
+  autoFocus: boolean;
+};
+
+const USER_PREFERENCES_STORAGE_KEY = 'fast-remember:user-preferences';
+const DEFAULT_GRAPH_RELATIONS: GraphRelationLabel[] = ['SYNONYM', 'ANTONYM', 'RELATED', 'ANALOGY'];
 
 const getEmotionTone = (emotion: string): Tone => {
   const normalized = emotion.trim().toLowerCase();
@@ -87,12 +101,27 @@ export default function Home() {
   const [isCurrentIdiomSaved, setIsCurrentIdiomSaved] = useState(false);
   const [isTopBarVisible, setIsTopBarVisible] = useState(true);
   const [isGraphPinned, setIsGraphPinned] = useState(true);
+  const [graphMode, setGraphMode] = useState<GraphViewMode>('overview');
+  const [graphCenter, setGraphCenter] = useState<string | null>(null);
+  const [labelVisibility, setLabelVisibility] = useState<GraphLabelVisibility>('focus');
+  const [defaultGraphDepth, setDefaultGraphDepth] = useState<0 | 1 | 2>(1);
+  const [graphNodeLimit, setGraphNodeLimit] = useState<100 | 300 | 800>(300);
+  const [graphRelationFilters, setGraphRelationFilters] = useState<GraphRelationLabel[]>(DEFAULT_GRAPH_RELATIONS);
+  const [autoFocusGraph, setAutoFocusGraph] = useState(true);
+  const [preferencesReady, setPreferencesReady] = useState(false);
   const [graphPinnedHeight, setGraphPinnedHeight] = useState<number | null>(null);
   const [graphPinnedTop, setGraphPinnedTop] = useState<number | null>(null);
   const [graphPinnedStyle, setGraphPinnedStyle] = useState<React.CSSProperties>({});
   const lastScrollYRef = useRef(0);
   const graphSectionRef = useRef<HTMLDivElement>(null);
   const graphViewportRef = useRef<HTMLDivElement>(null);
+
+  const graphDepth: 0 | 1 | 2 =
+    graphMode === 'overview'
+      ? 0
+      : graphMode === 'expanded'
+        ? 2
+        : (Math.max(1, defaultGraphDepth) as 1 | 2);
 
   const applyAnalysisResult = (result: IdiomResult, searchTerm?: string) => {
     setAnalysisResult(result);
@@ -111,6 +140,29 @@ export default function Home() {
     if (isCollapsed) {
       setIsCollapsed(false);
     }
+  };
+
+  const focusGraphOnIdiom = (idiom: string, preferredDepth?: 0 | 1 | 2) => {
+    const normalizedIdiom = idiom.trim();
+    if (!normalizedIdiom) {
+      return;
+    }
+
+    const nextDepth = preferredDepth ?? defaultGraphDepth;
+    setGraphCenter(normalizedIdiom);
+    setGraphMode(nextDepth >= 2 ? 'expanded' : 'focused');
+  };
+
+  const resetGraphToOverview = () => {
+    setGraphCenter(null);
+    setGraphMode('overview');
+  };
+
+  const expandFocusedGraph = () => {
+    if (!graphCenter) {
+      return;
+    }
+    setGraphMode('expanded');
   };
 
   const loadDiscoveryHistory = async () => {
@@ -186,6 +238,65 @@ export default function Home() {
 
     void initializeAuth();
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      const rawPreferences = window.localStorage.getItem(USER_PREFERENCES_STORAGE_KEY);
+
+      if (rawPreferences) {
+        const parsedPreferences = JSON.parse(rawPreferences) as Partial<UserPreferences>;
+
+        if (typeof parsedPreferences.isGraphPinned === 'boolean') {
+          setIsGraphPinned(parsedPreferences.isGraphPinned);
+        }
+        if (parsedPreferences.labelVisibility === 'focus' || parsedPreferences.labelVisibility === 'important' || parsedPreferences.labelVisibility === 'all') {
+          setLabelVisibility(parsedPreferences.labelVisibility);
+        }
+        if (parsedPreferences.defaultDepth === 0 || parsedPreferences.defaultDepth === 1 || parsedPreferences.defaultDepth === 2) {
+          setDefaultGraphDepth(parsedPreferences.defaultDepth);
+        }
+        if (parsedPreferences.nodeLimit === 100 || parsedPreferences.nodeLimit === 300 || parsedPreferences.nodeLimit === 800) {
+          setGraphNodeLimit(parsedPreferences.nodeLimit);
+        }
+        if (Array.isArray(parsedPreferences.relationFilters)) {
+          const nextFilters = parsedPreferences.relationFilters.filter((label): label is GraphRelationLabel =>
+            DEFAULT_GRAPH_RELATIONS.includes(label as GraphRelationLabel),
+          );
+          if (nextFilters.length > 0) {
+            setGraphRelationFilters(nextFilters);
+          }
+        }
+        if (typeof parsedPreferences.autoFocus === 'boolean') {
+          setAutoFocusGraph(parsedPreferences.autoFocus);
+        }
+      }
+    } catch (preferencesError) {
+      console.error('Failed to load user preferences:', preferencesError);
+    } finally {
+      setPreferencesReady(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !preferencesReady) {
+      return;
+    }
+
+    const preferences: UserPreferences = {
+      isGraphPinned,
+      labelVisibility,
+      defaultDepth: defaultGraphDepth,
+      nodeLimit: graphNodeLimit,
+      relationFilters: graphRelationFilters,
+      autoFocus: autoFocusGraph,
+    };
+
+    window.localStorage.setItem(USER_PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
+  }, [autoFocusGraph, defaultGraphDepth, graphNodeLimit, graphRelationFilters, isGraphPinned, labelVisibility, preferencesReady]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -318,6 +429,9 @@ export default function Home() {
     try {
       const res = await analyzeIdiom(searchTerm.trim());
       applyAnalysisResult(res, searchTerm);
+      if (autoFocusGraph) {
+        focusGraphOnIdiom(res.idiom);
+      }
       await Promise.all([
         syncSavedGraphState(res.idiom),
         loadDiscoveryHistory(),
@@ -343,6 +457,11 @@ export default function Home() {
     } catch (err: any) {
       console.error('Hover fetch failed:', err);
     }
+  };
+
+  const handleGraphNodeFocus = async (term: string) => {
+    focusGraphOnIdiom(term);
+    await handleHoverDetail(term);
   };
 
   const handleSearch = (e: React.FormEvent) => {
@@ -391,6 +510,7 @@ export default function Home() {
     setIsCurrentIdiomSaved(false);
     setSelectedSyns(new Set());
     setSelectedAnts(new Set());
+    resetGraphToOverview();
     setError(null);
     setSaveSuccess(false);
   };
@@ -398,6 +518,9 @@ export default function Home() {
   const handleHistorySelect = async (record: DiscoveryRecord) => {
     applyAnalysisResult(record.result, record.query);
     setActiveTab('discovery');
+    if (autoFocusGraph) {
+      focusGraphOnIdiom(record.result.idiom);
+    }
     await syncSavedGraphState(record.result.idiom);
   };
 
@@ -546,8 +669,8 @@ export default function Home() {
     });
   };
 
-  const handleGraphPinToggle = () => {
-    if (isGraphPinned) {
+  const updateGraphPinnedPreference = (nextPinned: boolean) => {
+    if (!nextPinned) {
       setIsGraphPinned(false);
       setGraphPinnedHeight(null);
       setGraphPinnedTop(null);
@@ -619,20 +742,21 @@ export default function Home() {
           </span>
         </div> */}
         <div className="mx-auto flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            onClick={handleGraphPinToggle}
-            aria-pressed={isGraphPinned}
-            aria-label={isGraphPinned ? t('unpinGraph') : t('pinGraph')}
-            className={cn(
-              "inline-flex items-center gap-2 rounded-full border border-border/60 bg-background/80 px-3 py-1.5 text-sm font-medium shadow-sm transition-colors hover:bg-muted",
-              isGraphPinned && "border-primary/40 text-primary"
-            )}
-            title={isGraphPinned ? t('unpinGraph') : t('pinGraph')}
-          >
-            {isGraphPinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
-            <span className="hidden md:inline">{isGraphPinned ? t('unpinGraph') : t('pinGraph')}</span>
-          </button>
+          <AppSettingsSheet
+            locale={locale}
+            isGraphPinned={isGraphPinned}
+            onGraphPinnedChange={updateGraphPinnedPreference}
+            labelVisibility={labelVisibility}
+            onLabelVisibilityChange={setLabelVisibility}
+            defaultDepth={defaultGraphDepth}
+            onDefaultDepthChange={setDefaultGraphDepth}
+            nodeLimit={graphNodeLimit}
+            onNodeLimitChange={setGraphNodeLimit}
+            relationFilters={graphRelationFilters}
+            onRelationFiltersChange={setGraphRelationFilters}
+            autoFocus={autoFocusGraph}
+            onAutoFocusChange={setAutoFocusGraph}
+          />
           <SkinToggle />
           <LanguageSwitcher />
         </div>
@@ -1130,8 +1254,18 @@ export default function Home() {
               <IdiomGraph
                 key={`${currentUser?.id ?? 'guest'}-${graphKey}`}
                 isAuthenticated={Boolean(currentUser)}
+                graphMode={graphMode}
+                graphCenter={graphCenter}
+                graphDepth={graphDepth}
+                nodeLimit={graphNodeLimit}
+                relationFilters={graphRelationFilters}
+                labelVisibility={labelVisibility}
+                refreshKey={graphKey}
                 onExpand={(term) => performSearch(term)}
                 onShowDetails={handleHoverDetail}
+                onFocusNode={(term) => void handleGraphNodeFocus(term)}
+                onReturnToOverview={resetGraphToOverview}
+                onExpandFocusedGraph={expandFocusedGraph}
                 onSaveSuccess={() => setGraphKey(prev => prev + 1)}
               />
             </div>

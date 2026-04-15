@@ -1,319 +1,269 @@
 "use client";
 
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { useTranslations } from 'next-intl';
-import { Plus, Minus, Maximize, ZoomIn, ZoomOut, Palette } from 'lucide-react';
+import { useLocale, useTranslations } from 'next-intl';
+import { Compass, Maximize, Network, Orbit, Plus, SearchSlash, Target, ZoomIn, ZoomOut } from 'lucide-react';
 import { useTheme } from 'next-themes';
-import { GraphData, fetchGraph, saveIdiom, IdiomResult, associateIdioms, dissociateIdioms } from '@/lib/api';
+
+import type { FetchGraphOptions, GraphData, GraphRelationLabel, IdiomResult } from '@/lib/api';
+import { associateIdioms, dissociateIdioms, fetchGraph, saveIdiom } from '@/lib/api';
 import CustomExpandModal from './CustomExpandModal';
 import NodeDetailCard from './NodeDetailCard';
-import RelationshipModal from './RelationshipModal';
 import RelationshipDetailCard from './RelationshipDetailCard';
+import RelationshipModal from './RelationshipModal';
 
-// Dynamically import ForceGraph2D to prevent SSR window is not defined errors
 const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), { ssr: false });
+
+type GraphViewMode = 'overview' | 'focused' | 'expanded';
+type GraphLabelVisibility = 'focus' | 'important' | 'all';
 
 interface IdiomGraphProps {
   onExpand?: (term: string) => void;
   onShowDetails?: (term: string) => void;
+  onFocusNode?: (term: string) => void;
+  onReturnToOverview?: () => void;
+  onExpandFocusedGraph?: () => void;
   onSaveSuccess?: () => void;
   isAuthenticated?: boolean;
+  graphMode: GraphViewMode;
+  graphCenter?: string | null;
+  graphDepth: 0 | 1 | 2;
+  nodeLimit: 100 | 300 | 800;
+  relationFilters: GraphRelationLabel[];
+  labelVisibility: GraphLabelVisibility;
+  refreshKey?: number;
 }
 
 const GRAPH_LAYOUT = {
-  largeNodeRadius: 16.5,
-  smallNodeRadius: 10.5,
-  linkGap: 10,
-  linkStrength: 0.55,
-  chargeStrength: -260,
-  glowPadding: 4,
-  glowSpread: 6,
+  overviewNodeRadius: 6,
+  focusedNodeRadius: 9,
+  meaningBoost: 2.5,
+  linkGap: 14,
   pointerRadiusInset: 0.5,
 } as const;
 
-const getNodeBaseRadius = (node?: { hasMeaning?: boolean } | null) =>
-  node?.hasMeaning ? GRAPH_LAYOUT.largeNodeRadius : GRAPH_LAYOUT.smallNodeRadius;
+const copyByLocale = {
+  zh: {
+    overview: '概览',
+    focused: '聚焦',
+    expanded: '扩展',
+    backToOverview: '返回概览',
+    expandMore: '继续展开',
+    centeredOn: '当前焦点',
+    visibleRelations: '关系筛选',
+  },
+  en: {
+    overview: 'Overview',
+    focused: 'Focused',
+    expanded: 'Expanded',
+    backToOverview: 'Back to overview',
+    expandMore: 'Expand more',
+    centeredOn: 'Focused on',
+    visibleRelations: 'Visible relations',
+  },
+} as const;
 
-const getLinkDistance = (
-  source?: { hasMeaning?: boolean } | null,
-  target?: { hasMeaning?: boolean } | null,
-) => getNodeBaseRadius(source) + getNodeBaseRadius(target) + GRAPH_LAYOUT.linkGap;
+const getNodeBaseRadius = (node: { hasMeaning?: boolean }, graphMode: GraphViewMode) => {
+  const baseRadius = graphMode === 'overview' ? GRAPH_LAYOUT.overviewNodeRadius : GRAPH_LAYOUT.focusedNodeRadius;
+  return baseRadius + (node.hasMeaning ? GRAPH_LAYOUT.meaningBoost : 0);
+};
 
-export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess, isAuthenticated = false }: IdiomGraphProps) {
+export default function IdiomGraph({
+  onExpand,
+  onShowDetails,
+  onFocusNode,
+  onReturnToOverview,
+  onExpandFocusedGraph,
+  onSaveSuccess,
+  isAuthenticated = false,
+  graphMode,
+  graphCenter,
+  graphDepth,
+  nodeLimit,
+  relationFilters,
+  labelVisibility,
+  refreshKey = 0,
+}: IdiomGraphProps) {
   const t = useTranslations('IdiomGraph');
+  const locale = useLocale();
+  const copy = locale === 'zh' ? copyByLocale.zh : copyByLocale.en;
   const { theme } = useTheme();
-  const isLight = theme && theme.startsWith('light');
+  const isLight = theme?.startsWith('light');
+
   const relationLabelMap: Record<string, string> = {
     SYNONYM: t('labels.synonym'),
     ANTONYM: t('labels.antonym'),
     RELATED: t('labels.related'),
     ANALOGY: t('labels.analogy'),
   };
+
   const fgRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
   const [data, setData] = useState<GraphData>({ nodes: [], links: [] });
   const [loading, setLoading] = useState(true);
-  const lastClickRef = useRef({ node: null, time: 0 });
-
-  // Highlight states
+  const [graphError, setGraphError] = useState<string | null>(null);
+  const [zoomLevel, setZoomLevel] = useState(1);
   const [hoverNode, setHoverNode] = useState<any>(null);
   const [hoverLink, setHoverLink] = useState<any>(null);
-  const [highlightNodes, setHighlightNodes] = useState(new Set());
-  const [highlightLinks, setHighlightLinks] = useState(new Set());
-
-  // Context Menu state
-  const [contextMenu, setContextMenu] = useState<{ x: number, y: number, node: any } | null>(null);
-  const [linkContextMenu, setLinkContextMenu] = useState<{ x: number, y: number, link: any } | null>(null);
-
-  // Detail Card state
   const [detailCardNode, setDetailCardNode] = useState<any>(null);
   const [hoverCardNode, setHoverCardNode] = useState<any>(null);
   const [hoverCardLink, setHoverCardLink] = useState<any>(null);
-
-  // Modal State
+  const [highlightNodes, setHighlightNodes] = useState<Set<string>>(new Set());
+  const [highlightLinks, setHighlightLinks] = useState<Set<any>>(new Set());
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: any } | null>(null);
+  const [linkContextMenu, setLinkContextMenu] = useState<{ x: number; y: number; link: any } | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalNode, setModalNode] = useState<string>('');
-
-  // Association state
-  const [linkSource, setLinkSource] = useState<any>(null);
-  const [currentPointerPos, setCurrentPointerPos] = useState<{ x: number, y: number } | null>(null);
-  const [isCtrlPressed, setIsCtrlPressed] = useState(false);
+  const [modalNode, setModalNode] = useState('');
   const [linkingSource, setLinkingSource] = useState<any>(null);
-  const [isRelationshipModalOpen, setIsRelationshipModalOpen] = useState(false);
   const [linkingTarget, setLinkingTarget] = useState<any>(null);
+  const [currentPointerPos, setCurrentPointerPos] = useState<{ x: number; y: number } | null>(null);
+  const [isRelationshipModalOpen, setIsRelationshipModalOpen] = useState(false);
 
-  const nodeHoverShowTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const nodeHoverHideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const linkHoverHideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const isHoveringNodeCardRef = useRef(false);
-  const isHoveringLinkCardRef = useRef(false);
+  const activeFetchOptions: FetchGraphOptions = {
+    mode: graphMode === 'overview' ? 'overview' : 'focus',
+    center: graphMode === 'overview' ? undefined : graphCenter ?? undefined,
+    depth: graphMode === 'overview' ? 0 : graphDepth,
+    limit: nodeLimit,
+    labels: relationFilters,
+  };
+
+  const importantNodeIds = useMemo(() => {
+    const sortedDegrees = [...data.nodes].map((node) => node.degree ?? 0).sort((left, right) => right - left);
+    const thresholdIndex = Math.min(sortedDegrees.length - 1, Math.max(0, Math.floor(sortedDegrees.length * 0.12)));
+    const threshold = sortedDegrees.length > 0 ? sortedDegrees[thresholdIndex] : 0;
+    return new Set(data.nodes.filter((node) => (node.degree ?? 0) >= threshold && (node.degree ?? 0) > 0).map((node) => node.id));
+  }, [data.nodes]);
+
+  const loadGraphData = useCallback(async () => {
+    if (!isAuthenticated) {
+      setData({ nodes: [], links: [] });
+      setLoading(false);
+      setGraphError(null);
+      return;
+    }
+
+    setLoading(true);
+    setGraphError(null);
+    try {
+      const result = await fetchGraph(activeFetchOptions);
+      setData(result);
+    } catch (error: any) {
+      console.error('Failed to load graph data:', error);
+      setGraphError(error?.message ?? 'Failed to load graph data');
+      setData({ nodes: [], links: [] });
+    } finally {
+      setLoading(false);
+    }
+  }, [
+    activeFetchOptions.center,
+    activeFetchOptions.depth,
+    activeFetchOptions.limit,
+    activeFetchOptions.mode,
+    isAuthenticated,
+    relationFilters,
+  ]);
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Control') setIsCtrlPressed(true);
-      if (e.key === 'Escape') {
-        setLinkingSource(null);
-        setCurrentPointerPos(null);
+    void loadGraphData();
+  }, [loadGraphData, refreshKey]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (!fgRef.current || data.nodes.length === 0) {
+        return;
       }
-    };
-    const handleKeyUp = (e: KeyboardEvent) => { if (e.key === 'Control') setIsCtrlPressed(false); };
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, []);
 
-  useEffect(() => {
-    return () => {
-      if (nodeHoverShowTimeoutRef.current) clearTimeout(nodeHoverShowTimeoutRef.current);
-      if (nodeHoverHideTimeoutRef.current) clearTimeout(nodeHoverHideTimeoutRef.current);
-      if (linkHoverHideTimeoutRef.current) clearTimeout(linkHoverHideTimeoutRef.current);
-    };
+      const nodeById = new Map(data.nodes.map((node) => [node.id, node]));
+      fgRef.current.d3Force('link')?.distance((link: any) => {
+        const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+        const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+        const source = nodeById.get(sourceId) ?? { hasMeaning: false };
+        const target = nodeById.get(targetId) ?? { hasMeaning: false };
+        return getNodeBaseRadius(source, graphMode) + getNodeBaseRadius(target, graphMode) + GRAPH_LAYOUT.linkGap;
+      });
+      fgRef.current.d3Force('link')?.strength(() => (graphMode === 'overview' ? 0.28 : 0.48));
+      fgRef.current.d3Force('charge')?.strength(graphMode === 'overview' ? -90 : -180);
+      fgRef.current.d3ReheatSimulation?.();
+      fgRef.current.zoomToFit(600, 80);
+    }, 240);
+
+    return () => window.clearTimeout(timer);
+  }, [data, graphMode]);
+
+  const updateHighlightSets = (nodes: Set<string>, links: Set<any>) => {
+    setHighlightNodes(new Set(nodes));
+    setHighlightLinks(new Set(links));
+  };
+
+  const applyNodeHighlight = useCallback((node: any | null) => {
+    const nextNodes = new Set<string>();
+    const nextLinks = new Set<any>();
+    if (node) {
+      nextNodes.add(node.id);
+      data.links.forEach((link: any) => {
+        const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+        const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+        if (sourceId === node.id || targetId === node.id) {
+          nextLinks.add(link);
+          nextNodes.add(sourceId);
+          nextNodes.add(targetId);
+        }
+      });
+    }
+    updateHighlightSets(nextNodes, nextLinks);
+  }, [data.links]);
+
+  const applyLinkHighlight = useCallback((link: any | null) => {
+    const nextNodes = new Set<string>();
+    const nextLinks = new Set<any>();
+    if (link) {
+      nextLinks.add(link);
+      nextNodes.add(typeof link.source === 'object' ? link.source.id : link.source);
+      nextNodes.add(typeof link.target === 'object' ? link.target.id : link.target);
+    }
+    updateHighlightSets(nextNodes, nextLinks);
   }, []);
 
   const handleZoomIn = useCallback(() => {
-    if (fgRef.current) {
-      const currentZoom = fgRef.current.zoom();
-      fgRef.current.zoom(currentZoom * 1.5, 500);
+    if (!fgRef.current) {
+      return;
     }
+    const currentZoom = fgRef.current.zoom();
+    fgRef.current.zoom(currentZoom * 1.45, 320);
   }, []);
 
   const handleZoomOut = useCallback(() => {
-    if (fgRef.current) {
-      const currentZoom = fgRef.current.zoom();
-      fgRef.current.zoom(currentZoom / 1.5, 500);
+    if (!fgRef.current) {
+      return;
     }
+    const currentZoom = fgRef.current.zoom();
+    fgRef.current.zoom(currentZoom / 1.45, 320);
   }, []);
 
   const handleZoomToFit = useCallback(() => {
-    if (fgRef.current) {
-      fgRef.current.zoomToFit(600, 50);
-    }
+    fgRef.current?.zoomToFit(500, 70);
   }, []);
 
-  const updateHighlight = () => {
-    setHighlightNodes(new Set(highlightNodes));
-    setHighlightLinks(new Set(highlightLinks));
-  };
+  const handleNodeHover = (node: any | null) => {
+    setHoverLink(null);
+    setHoverCardLink(null);
+    setHoverNode(node);
+    setHoverCardNode(node);
+    applyNodeHighlight(node);
 
-  const applyNodeHighlight = (node: any) => {
-    highlightNodes.clear();
-    highlightLinks.clear();
-
-    if (!node) {
-      updateHighlight();
-      return;
-    }
-
-    highlightNodes.add(node.id);
-    data.links.forEach((link: any) => {
-      const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
-      const targetId = typeof link.target === 'object' ? link.target.id : link.target;
-
-      if (sourceId === node.id || targetId === node.id) {
-        highlightLinks.add(link);
-        highlightNodes.add(sourceId);
-        highlightNodes.add(targetId);
-      }
-    });
-
-    updateHighlight();
-  };
-
-  const applyLinkHighlight = (link: any) => {
-    highlightNodes.clear();
-    highlightLinks.clear();
-
-    if (!link) {
-      updateHighlight();
-      return;
-    }
-
-    highlightLinks.add(link);
-    highlightNodes.add(typeof link.source === 'object' ? link.source.id : link.source);
-    highlightNodes.add(typeof link.target === 'object' ? link.target.id : link.target);
-    updateHighlight();
-  };
-
-  const clearNodeHoverTimers = () => {
-    if (nodeHoverShowTimeoutRef.current) {
-      clearTimeout(nodeHoverShowTimeoutRef.current);
-      nodeHoverShowTimeoutRef.current = null;
-    }
-
-    if (nodeHoverHideTimeoutRef.current) {
-      clearTimeout(nodeHoverHideTimeoutRef.current);
-      nodeHoverHideTimeoutRef.current = null;
+    if (node) {
+      onShowDetails?.(node.id);
     }
   };
 
-  const clearLinkHoverTimer = () => {
-    if (linkHoverHideTimeoutRef.current) {
-      clearTimeout(linkHoverHideTimeoutRef.current);
-      linkHoverHideTimeoutRef.current = null;
-    }
-  };
-
-  const clearNodeHoverState = () => {
-    clearNodeHoverTimers();
-    isHoveringNodeCardRef.current = false;
+  const handleLinkHover = (link: any | null) => {
     setHoverNode(null);
     setHoverCardNode(null);
-    applyNodeHighlight(null);
-  };
-
-  const clearLinkHoverState = () => {
-    clearLinkHoverTimer();
-    isHoveringLinkCardRef.current = false;
-    setHoverLink(null);
-    setHoverCardLink(null);
-    applyLinkHighlight(null);
-  };
-
-  const scheduleNodeHoverClear = () => {
-    if (nodeHoverHideTimeoutRef.current) {
-      clearTimeout(nodeHoverHideTimeoutRef.current);
-    }
-
-    nodeHoverHideTimeoutRef.current = setTimeout(() => {
-      nodeHoverHideTimeoutRef.current = null;
-      if (isHoveringNodeCardRef.current) {
-        return;
-      }
-      clearNodeHoverState();
-    }, 160);
-  };
-
-  const scheduleLinkHoverClear = () => {
-    if (linkHoverHideTimeoutRef.current) {
-      clearTimeout(linkHoverHideTimeoutRef.current);
-    }
-
-    linkHoverHideTimeoutRef.current = setTimeout(() => {
-      linkHoverHideTimeoutRef.current = null;
-      if (isHoveringLinkCardRef.current) {
-        return;
-      }
-      clearLinkHoverState();
-    }, 160);
-  };
-
-  const handleHoverNodeCardEnter = () => {
-    clearNodeHoverTimers();
-    isHoveringNodeCardRef.current = true;
-    if (hoverCardNode) {
-      setHoverNode(hoverCardNode);
-      applyNodeHighlight(hoverCardNode);
-    }
-  };
-
-  const handleHoverNodeCardLeave = () => {
-    isHoveringNodeCardRef.current = false;
-    scheduleNodeHoverClear();
-  };
-
-  const handleHoverLinkCardEnter = () => {
-    clearLinkHoverTimer();
-    isHoveringLinkCardRef.current = true;
-    if (hoverCardLink) {
-      setHoverLink(hoverCardLink);
-      applyLinkHighlight(hoverCardLink);
-    }
-  };
-
-  const handleHoverLinkCardLeave = () => {
-    isHoveringLinkCardRef.current = false;
-    scheduleLinkHoverClear();
-  };
-
-  const handleNodeHover = (node: any) => {
-    if (node) {
-      clearNodeHoverTimers();
-      clearLinkHoverState();
-
-      applyNodeHighlight(node);
-      setHoverNode(node);
-
-      nodeHoverShowTimeoutRef.current = setTimeout(() => {
-        if (onShowDetails) onShowDetails(node.id);
-        setHoverCardNode(node);
-        nodeHoverShowTimeoutRef.current = null;
-      }, 300);
-    } else {
-      scheduleNodeHoverClear();
-    }
-  };
-
-  const handleNodeRightClick = (node: any, event: any) => {
-    event.preventDefault();
-    setHoverNode(null);
-    setHoverLink(null);
-    setHoverCardNode(null); // Hide hover card
-    setHoverCardLink(null);
-    setLinkContextMenu(null);
-    setContextMenu({ x: event.clientX, y: event.clientY, node });
-  };
-
-  const handleLinkRightClick = (link: any, event: any) => {
-    event.preventDefault();
-    setHoverNode(null);
-    setHoverLink(null);
-    setHoverCardNode(null); // Hide hover card
-    setHoverCardLink(null);
-    setContextMenu(null);
-
-    // Calculate position relative to container
-    if (containerRef.current) {
-      const rect = containerRef.current.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
-      setLinkContextMenu({ x, y, link });
-    } else {
-      setLinkContextMenu({ x: event.clientX, y: event.clientY, link });
-    }
+    setHoverLink(link);
+    setHoverCardLink(link);
+    applyLinkHighlight(link);
   };
 
   const handlePinNode = (node: any) => {
@@ -325,17 +275,7 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess, isA
       node.fy = undefined;
     }
     setContextMenu(null);
-    fgRef.current.d3ReheatSimulation();
-  };
-
-  const handleExpandNode = (node: any) => {
-    if (onExpand) onExpand(node.id);
-    setContextMenu(null);
-  };
-
-  const handleShowNodeDetails = (node: any) => {
-    setDetailCardNode(node);
-    setContextMenu(null);
+    fgRef.current?.d3ReheatSimulation?.();
   };
 
   const handleCustomExpand = (node: any) => {
@@ -346,14 +286,8 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess, isA
 
   const handleModalSubmit = async (result: IdiomResult) => {
     await saveIdiom(result);
-    if (onSaveSuccess) onSaveSuccess();
-  };
-
-  const handleStartConnection = (node: any) => {
-    setLinkingSource(node);
-    setContextMenu(null);
-    // Explicitly set pointer position to start where node is
-    setCurrentPointerPos({ x: node.x, y: node.y });
+    onSaveSuccess?.();
+    await loadGraphData();
   };
 
   const handleRelationshipSubmit = async (params: {
@@ -364,41 +298,48 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess, isA
     sourceExample?: string;
     targetExample?: string;
   }) => {
-    if (linkingSource && linkingTarget) {
-      // If we are editing (linkContextMenu exists) and the label changed, delete the old one first
-      if (linkContextMenu && linkContextMenu.link.label !== params.label) {
-        await dissociateIdioms(
-          typeof linkContextMenu.link.source === 'object' ? linkContextMenu.link.source.id : linkContextMenu.link.source,
-          typeof linkContextMenu.link.target === 'object' ? linkContextMenu.link.target.id : linkContextMenu.link.target,
-          linkContextMenu.link.label
-        );
-      }
-
-      await associateIdioms(linkingSource.id, linkingTarget.id, params.label, params.strength, {
-        similarityType: params.similarityType,
-        difference: params.difference,
-        sourceExample: params.sourceExample,
-        targetExample: params.targetExample,
-      });
-      fetchGraph().then(setData); // Refresh graph
-      setLinkingSource(null);
-      setLinkingTarget(null);
-      setCurrentPointerPos(null);
-      setLinkContextMenu(null);
+    if (!linkingSource || !linkingTarget) {
+      return;
     }
+
+    if (linkContextMenu && linkContextMenu.link.label !== params.label) {
+      await dissociateIdioms(
+        typeof linkContextMenu.link.source === 'object' ? linkContextMenu.link.source.id : linkContextMenu.link.source,
+        typeof linkContextMenu.link.target === 'object' ? linkContextMenu.link.target.id : linkContextMenu.link.target,
+        linkContextMenu.link.label,
+      );
+    }
+
+    await associateIdioms(linkingSource.id, linkingTarget.id, params.label, params.strength, {
+      similarityType: params.similarityType,
+      difference: params.difference,
+      sourceExample: params.sourceExample,
+      targetExample: params.targetExample,
+    });
+
+    setLinkingSource(null);
+    setLinkingTarget(null);
+    setCurrentPointerPos(null);
+    setLinkContextMenu(null);
+    setIsRelationshipModalOpen(false);
+    onSaveSuccess?.();
+    await loadGraphData();
   };
 
   const handleRelationshipDelete = async () => {
-    if (linkContextMenu) {
-      const { link } = linkContextMenu;
-      await dissociateIdioms(
-        typeof link.source === 'object' ? link.source.id : link.source,
-        typeof link.target === 'object' ? link.target.id : link.target,
-        link.label
-      );
-      fetchGraph().then(setData);
-      setLinkContextMenu(null);
+    if (!linkContextMenu) {
+      return;
     }
+
+    const { link } = linkContextMenu;
+    await dissociateIdioms(
+      typeof link.source === 'object' ? link.source.id : link.source,
+      typeof link.target === 'object' ? link.target.id : link.target,
+      link.label,
+    );
+    setLinkContextMenu(null);
+    onSaveSuccess?.();
+    await loadGraphData();
   };
 
   const handleEditRelationship = (link: any) => {
@@ -408,164 +349,203 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess, isA
   };
 
   const handleReverseRelationship = async (link: any) => {
-    const s = typeof link.source === 'object' ? link.source.id : link.source;
-    const t = typeof link.target === 'object' ? link.target.id : link.target;
+    const source = typeof link.source === 'object' ? link.source.id : link.source;
+    const target = typeof link.target === 'object' ? link.target.id : link.target;
 
-    await dissociateIdioms(s, t, link.label);
-    await associateIdioms(t, s, link.label, link.strength, {
+    await dissociateIdioms(source, target, link.label);
+    await associateIdioms(target, source, link.label, link.strength, {
       similarityType: link.similarityType,
       difference: link.difference,
       sourceExample: link.targetExample,
       targetExample: link.sourceExample,
     });
-    fetchGraph().then(setData);
+
     setLinkContextMenu(null);
+    onSaveSuccess?.();
+    await loadGraphData();
   };
 
-  useEffect(() => {
-    // Tune the force configuration after graph data changes.
-    const timer = setTimeout(() => {
-      if (fgRef.current) {
-        const nodeById = new Map(data.nodes.map(node => [node.id, node]));
-        const resolveLinkNode = (nodeRef: any) =>
-          typeof nodeRef === 'object' ? nodeRef : nodeById.get(nodeRef);
-        fgRef.current.d3Force('link')?.distance((link: any) => {
-          const source = resolveLinkNode(link.source);
-          const target = resolveLinkNode(link.target);
-          
-          // Link distance is managed centrally and only varies with node size.
-          return getLinkDistance(source, target);
-        });
-
-        // Keep the layout forces centralized as well.
-        fgRef.current.d3Force('link')?.strength(() => GRAPH_LAYOUT.linkStrength);
-
-        fgRef.current.d3Force('charge')?.strength(GRAPH_LAYOUT.chargeStrength);
-        // Reheat simulation so changes take effect
-        fgRef.current.d3ReheatSimulation?.();
-      }
-    }, 500);
-
-    return () => clearTimeout(timer);
-  }, [data]);
-
-  useEffect(() => {
-    if (!isAuthenticated) {
-      setData({ nodes: [], links: [] });
-      setLoading(false);
-      return;
+  const shouldShowLabel = (node: any) => {
+    if (!node?.label) {
+      return false;
     }
+    if (hoverNode?.id === node.id || detailCardNode?.id === node.id || graphCenter === node.id) {
+      return true;
+    }
+    if (labelVisibility === 'all') {
+      return zoomLevel > 0.72 || data.nodes.length <= 30;
+    }
+    if (labelVisibility === 'important' && importantNodeIds.has(node.id)) {
+      return zoomLevel > 0.65;
+    }
+    return zoomLevel > 1.8 && graphMode !== 'overview';
+  };
 
-    setLoading(true);
-    fetchGraph()
-      .then((res) => {
-        setData(res);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error('Failed to load graph data:', err);
-        setLoading(false);
-      });
-  }, [isAuthenticated]);
+  const relationFilterSummary = relationFilters.map((label) => relationLabelMap[label] ?? label).join(' / ');
 
   if (loading) {
-    return <div className="w-full h-full flex items-center justify-center text-muted-foreground border rounded-xl bg-muted/20">{t('loading')}</div>;
+    return <div className="flex h-full w-full items-center justify-center rounded-xl border bg-muted/20 text-muted-foreground">{t('loading')}</div>;
   }
 
   if (!isAuthenticated) {
-    return <div className="w-full h-full flex items-center justify-center text-muted-foreground border rounded-xl bg-muted/20">{t('loginRequired')}</div>;
+    return <div className="flex h-full w-full items-center justify-center rounded-xl border bg-muted/20 text-muted-foreground">{t('loginRequired')}</div>;
+  }
+
+  if (graphError) {
+    return <div className="flex h-full w-full items-center justify-center rounded-xl border bg-muted/20 px-6 text-center text-sm text-muted-foreground">{graphError}</div>;
   }
 
   if (data.nodes.length === 0) {
-    return <div className="w-full h-full flex items-center justify-center text-muted-foreground border rounded-xl bg-muted/20">{t('noData')}</div>;
+    return (
+      <div className="flex h-full w-full flex-col items-center justify-center gap-3 rounded-xl border bg-muted/20 px-6 text-center text-muted-foreground">
+        <SearchSlash className="h-8 w-8" />
+        <p>{t('noData')}</p>
+      </div>
+    );
   }
 
   return (
     <div
       ref={containerRef}
-      className="w-full h-full border border-border/50 rounded-xl overflow-hidden relative shadow-inner"
-      onMouseMove={(e) => {
-        if (linkingSource && fgRef.current) {
-          const { x, y } = fgRef.current.screen2GraphCoords(e.clientX, e.clientY);
-          setCurrentPointerPos({ x, y });
+      className="relative h-full w-full overflow-hidden rounded-xl border border-border/50 shadow-inner"
+      onMouseMove={(event) => {
+        if (!linkingSource || !fgRef.current) {
+          return;
         }
+        const { x, y } = fgRef.current.screen2GraphCoords(event.clientX, event.clientY);
+        setCurrentPointerPos({ x, y });
       }}
       style={{
         backgroundColor: 'var(--background)',
         backgroundImage: `
-          linear-gradient(var(--grid-color) 1px, transparent 1px),
-          linear-gradient(90deg, var(--grid-color) 1px, transparent 1px)
+          linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px)
         `,
-        backgroundSize: '40px 40px'
+        backgroundSize: graphMode === 'overview' ? '44px 44px' : '34px 34px',
       }}
     >
+      <div className="pointer-events-none absolute left-4 top-4 z-20 flex max-w-[70%] flex-col gap-2">
+        <div className="pointer-events-auto inline-flex w-fit items-center gap-2 rounded-full border border-border/60 bg-background/85 px-3 py-1.5 text-xs font-medium shadow-lg backdrop-blur">
+          {graphMode === 'overview' ? <Network className="h-3.5 w-3.5 text-primary" /> : <Target className="h-3.5 w-3.5 text-primary" />}
+          <span>{graphMode === 'overview' ? copy.overview : graphMode === 'focused' ? copy.focused : copy.expanded}</span>
+          <span className="text-muted-foreground">{data.nodes.length} nodes</span>
+        </div>
+
+        <div className="pointer-events-auto inline-flex w-fit flex-wrap items-center gap-2 rounded-2xl border border-border/60 bg-background/80 px-3 py-2 text-xs text-muted-foreground shadow-lg backdrop-blur">
+          {graphCenter && graphMode !== 'overview' && (
+            <span className="font-medium text-foreground">
+              {copy.centeredOn}: {graphCenter}
+            </span>
+          )}
+          <span>
+            {copy.visibleRelations}: {relationFilterSummary}
+          </span>
+        </div>
+      </div>
+
+      <div className="absolute bottom-6 left-4 z-20 flex flex-wrap gap-2">
+        {graphMode !== 'overview' && onReturnToOverview && (
+          <button
+            type="button"
+            onClick={onReturnToOverview}
+            className="rounded-full border border-border/60 bg-background/85 px-3 py-2 text-xs font-medium shadow-lg backdrop-blur transition-colors hover:bg-muted"
+          >
+            {copy.backToOverview}
+          </button>
+        )}
+        {graphMode === 'focused' && onExpandFocusedGraph && (
+          <button
+            type="button"
+            onClick={onExpandFocusedGraph}
+            className="rounded-full border border-primary/50 bg-primary/10 px-3 py-2 text-xs font-medium text-primary shadow-lg backdrop-blur transition-colors hover:bg-primary/15"
+          >
+            {copy.expandMore}
+          </button>
+        )}
+      </div>
+
       <ForceGraph2D
         ref={fgRef}
         graphData={data}
-        nodeLabel="" // We draw the label inside the node, so disable tooltip if desired, or keep it.
-        nodeAutoColorBy="id" // Gives each distinct idiom a distinct color
-        linkDirectionalArrowLength={3.5} // Restored arrows
+        nodeLabel=""
+        linkDirectionalArrowLength={graphMode === 'overview' ? 0 : 3}
         linkDirectionalArrowRelPos={1}
-        nodeCanvasObject={(node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
-          if (typeof node.x !== 'number' || typeof node.y !== 'number' || isNaN(node.x) || isNaN(node.y)) {
+        onZoomEnd={({ k }: { k: number }) => setZoomLevel(k)}
+        nodeCanvasObject={(node: any, ctx: CanvasRenderingContext2D) => {
+          if (typeof node.x !== 'number' || typeof node.y !== 'number' || Number.isNaN(node.x) || Number.isNaN(node.y)) {
             return;
           }
-          const label = node.label || '';
-          const baseRadius = getNodeBaseRadius(node);
-          const r = baseRadius;
 
-          // Highlight logic
-          const isHighlighted = highlightNodes.has(node.id);
-          const isDimmed = hoverNode && !isHighlighted;
-          const globalAlpha = isDimmed ? 0.15 : 1;
-          ctx.globalAlpha = globalAlpha;
+          const radius = getNodeBaseRadius(node, graphMode);
+          const isHighlighted = highlightNodes.has(node.id) || graphCenter === node.id;
+          const isDimmed = (hoverNode || hoverLink || graphCenter) && !isHighlighted && graphMode !== 'overview';
+          const alpha = graphMode === 'overview' ? (isDimmed ? 0.1 : 0.86) : (isDimmed ? 0.18 : 1);
+          ctx.globalAlpha = alpha;
 
-          // Color mapping based on emotion (more robust matching for both Chinese and English labels)
-          let nodeColor = '#3e74ce'; // Default Neutral (Cobalt Blue)
-          const emo = (node.emotion || node.sentiment || '').trim().toLowerCase();
-
-          if (emo.includes('褒') || emo === 'positive') {
-            nodeColor = '#38d19a'; // Positive (Teal)
-          } else if (emo.includes('贬') || emo === 'negative') {
-            nodeColor = '#ba516d'; // Negative (Rose)
-          } else if (emo.includes('中') || emo === 'neutral') {
-            nodeColor = '#3e74ce'; // Neutral (Cobalt Blue)
+          const emotion = (node.emotion || '').trim().toLowerCase();
+          let nodeColor = '#3e74ce';
+          if (emotion.includes('positive') || emotion.includes('积') || emotion.includes('褒')) {
+            nodeColor = '#38d19a';
+          } else if (emotion.includes('negative') || emotion.includes('贬') || emotion.includes('消')) {
+            nodeColor = '#c85d75';
           }
 
-          // Outer glow for breathing effect
           ctx.beginPath();
-          ctx.arc(node.x, node.y, r + GRAPH_LAYOUT.glowPadding, 0, 2 * Math.PI, false);
-          const gradient = ctx.createRadialGradient(node.x, node.y, r, node.x, node.y, r + GRAPH_LAYOUT.glowSpread);
-          gradient.addColorStop(0, `${nodeColor}44`);
-          gradient.addColorStop(1, 'transparent');
-          ctx.fillStyle = gradient;
+          ctx.arc(node.x, node.y, radius + (isHighlighted ? 3 : 1.5), 0, 2 * Math.PI, false);
+          ctx.fillStyle = isHighlighted ? `${nodeColor}55` : `${nodeColor}22`;
           ctx.fill();
 
-          // Main circle
           ctx.beginPath();
-          ctx.arc(node.x, node.y, r, 0, 2 * Math.PI, false);
+          ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI, false);
           ctx.fillStyle = nodeColor;
           ctx.fill();
 
-          // Draw "Pinned" indicator if pinned
           if (node.fx !== undefined) {
             ctx.beginPath();
-            ctx.arc(node.x + r * 0.6, node.y - r * 0.6, 3, 0, 2 * Math.PI);
-            ctx.fillStyle = isLight ? '#000000' : '#ffffff';
+            ctx.arc(node.x + radius * 0.65, node.y - radius * 0.65, 3, 0, 2 * Math.PI);
+            ctx.fillStyle = isLight ? '#111827' : '#ffffff';
             ctx.fill();
           }
 
-          // Draw white text inside
-          const fontSize = (label.length > 4 ? 0.35 : 0.4) * baseRadius * (r / baseRadius);
-          ctx.font = `600 ${fontSize}px "Microsoft YaHei", Inter, sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillStyle = isLight ? '#ffffff' : '#ffffff'; // Sticking to white text for nodes as they have colored backgrounds
-          ctx.shadowColor = 'rgba(0,0,0,0.3)';
-          ctx.shadowBlur = 4;
-          ctx.fillText(label, node.x, node.y);
-          ctx.shadowBlur = 0; // Reset shadow
-          ctx.globalAlpha = 1; // Reset alpha
+          if (shouldShowLabel(node)) {
+            const fontSize = Math.max(7, radius * 0.58);
+            ctx.font = `600 ${fontSize}px "Microsoft YaHei", Inter, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = '#ffffff';
+            ctx.shadowColor = 'rgba(15, 23, 42, 0.35)';
+            ctx.shadowBlur = 5;
+            ctx.fillText(node.label, node.x, node.y);
+            ctx.shadowBlur = 0;
+          }
+
+          ctx.globalAlpha = 1;
+        }}
+        nodePointerAreaPaint={(node: any, color: string, ctx: CanvasRenderingContext2D) => {
+          if (typeof node.x !== 'number' || typeof node.y !== 'number' || Number.isNaN(node.x) || Number.isNaN(node.y)) {
+            return;
+          }
+          const radius = getNodeBaseRadius(node, graphMode) - GRAPH_LAYOUT.pointerRadiusInset;
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI, false);
+          ctx.fill();
+        }}
+        onNodeHover={handleNodeHover}
+        onLinkHover={handleLinkHover}
+        onNodeRightClick={(node: any, event: any) => {
+          event.preventDefault();
+          setContextMenu({ x: event.clientX, y: event.clientY, node });
+          setLinkContextMenu(null);
+        }}
+        onLinkRightClick={(link: any, event: any) => {
+          event.preventDefault();
+          if (!containerRef.current) {
+            return;
+          }
+          const rect = containerRef.current.getBoundingClientRect();
+          setLinkContextMenu({ x: event.clientX - rect.left, y: event.clientY - rect.top, link });
+          setContextMenu(null);
         }}
         onNodeClick={(node: any) => {
           if (linkingSource && linkingSource.id !== node.id) {
@@ -574,187 +554,115 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess, isA
             return;
           }
 
-          setContextMenu(null);
-          setDetailCardNode(null);
-
-          const now = Date.now();
-          if (lastClickRef.current.node === node.id && (now - lastClickRef.current.time) < 300) {
-            handlePinNode(node);
-            lastClickRef.current = { node: null, time: 0 };
-          } else {
-            lastClickRef.current = { node: node.id, time: now };
-          }
-        }}
-        onNodeHover={handleNodeHover}
-        onNodeRightClick={handleNodeRightClick}
-        onLinkHover={(link: any) => {
-          if (link) {
-            clearLinkHoverTimer();
-            clearNodeHoverState();
-            setHoverLink(link);
-            setHoverCardLink(link);
-            applyLinkHighlight(link);
-          } else {
-            scheduleLinkHoverClear();
-          }
-        }}
-        onLinkRightClick={handleLinkRightClick}
-        linkLabel={() => ''}
-        nodePointerAreaPaint={(node: any, color, ctx) => {
-          if (typeof node.x !== 'number' || typeof node.y !== 'number' || isNaN(node.x) || isNaN(node.y)) {
-            return;
-          }
-          ctx.fillStyle = color;
-          ctx.beginPath();
-          const r = getNodeBaseRadius(node) - GRAPH_LAYOUT.pointerRadiusInset;
-          ctx.arc(node.x, node.y, r, 0, 2 * Math.PI, false);
-          ctx.fill();
+          setDetailCardNode(node);
+          onShowDetails?.(node.id);
+          onFocusNode?.(node.id);
         }}
         onBackgroundClick={() => {
           setContextMenu(null);
           setLinkContextMenu(null);
           setDetailCardNode(null);
-          if (linkingSource) {
-            setLinkingSource(null);
-            setCurrentPointerPos(null);
-          }
-        }}
-        // Association drag logic
-        onNodeDrag={(node: any, event: any) => {
-          if (event.ctrlKey) {
-            if (!linkSource) {
-              setLinkSource(node);
-              // Fix node position temporarily to prevent it from moving while linking
-              node.__oldFx = node.fx;
-              node.__oldFy = node.fy;
-              node.fx = node.x;
-              node.fy = node.y;
-            }
-            // Update mouse position in graph coordinates
-            const { x, y } = fgRef.current.screen2GraphCoords(event.x, event.y);
-            setCurrentPointerPos({ x, y });
-          }
-        }}
-        onNodeDragEnd={(node: any) => {
-          if (linkSource) {
-            // Check if we are over another node
-            if (hoverNode && hoverNode.id !== linkSource.id) {
-              setLinkingSource(linkSource);
-              setLinkingTarget(hoverNode);
-              setIsRelationshipModalOpen(true);
-            }
-
-            // Restore node fixed state
-            if (node.__oldFx === undefined) delete node.fx; else node.fx = node.__oldFx;
-            if (node.__oldFy === undefined) delete node.fy; else node.fy = node.__oldFy;
-
-            setLinkSource(null);
-            setCurrentPointerPos(null);
-          }
+          setHoverCardNode(null);
+          setHoverCardLink(null);
+          setHoverNode(null);
+          setHoverLink(null);
+          applyNodeHighlight(null);
+          setLinkingSource(null);
+          setCurrentPointerPos(null);
         }}
         onRenderFramePost={(ctx, globalScale) => {
-          const activeSource = linkingSource || linkSource;
-          if (activeSource && (currentPointerPos || hoverNode)) {
-            const target = (hoverNode && hoverNode.id !== activeSource.id) ? hoverNode : currentPointerPos;
-            if (target) {
-              ctx.beginPath();
-              ctx.moveTo(activeSource.x, activeSource.y);
-              ctx.lineTo(target.x, target.y);
-              ctx.strokeStyle = linkingSource ? 'rgba(56, 209, 154, 0.8)' : (isLight ? 'rgba(0, 0, 0, 0.4)' : 'rgba(255, 255, 255, 0.4)');
-              ctx.setLineDash([5, 5]);
-              ctx.lineWidth = 2 / globalScale;
-              ctx.stroke();
-              ctx.setLineDash([]);
-
-              // If it's the target node, draw a small circle at the tip
-              if (hoverNode && hoverNode.id !== activeSource.id) {
-                ctx.beginPath();
-                ctx.arc(hoverNode.x, hoverNode.y, 8 / globalScale, 0, 2 * Math.PI);
-                ctx.fillStyle = 'rgba(56, 209, 154, 0.4)';
-                ctx.fill();
-              }
-            }
+          if (!linkingSource || !currentPointerPos) {
+            return;
           }
+          ctx.beginPath();
+          ctx.moveTo(linkingSource.x, linkingSource.y);
+          ctx.lineTo(currentPointerPos.x, currentPointerPos.y);
+          ctx.setLineDash([5, 5]);
+          ctx.strokeStyle = 'rgba(56, 209, 154, 0.85)';
+          ctx.lineWidth = 2 / globalScale;
+          ctx.stroke();
+          ctx.setLineDash([]);
         }}
         linkColor={(link: any) => {
           const isHighlighted = highlightLinks.has(link);
-          const isHovered = hoverLink === link;
-          const isDimmed = (hoverNode || hoverLink) && !isHighlighted;
-          const alpha = isDimmed ? 0.05 : (isHovered ? 0.8 : 0.5);
+          const isDimmed = (hoverNode || hoverLink || graphCenter) && !isHighlighted && graphMode !== 'overview';
+          const alpha = isDimmed ? 0.04 : (graphMode === 'overview' ? 0.22 : 0.42);
           const strength = link.strength || 0.5;
 
           if (link.label === 'SYNONYM') {
-            const hue = 180 - strength * 60;
-            const lightness = 70 - strength * 30;
-            return `hsla(${hue}, 80%, ${lightness}%, ${alpha + strength * 0.2})`;
-          } else if (link.label === 'ANTONYM') {
-            const saturation = 70 + strength * 30;
-            const lightness = 70 - strength * 50;
-            return `hsla(0, ${saturation}%, ${lightness}%, ${alpha + strength * 0.3})`;
+            return `hsla(${170 - strength * 35}, 78%, ${62 - strength * 18}%, ${alpha + strength * 0.18})`;
           }
-          return `rgba(156, 163, 175, ${alpha})`;
+          if (link.label === 'ANTONYM') {
+            return `hsla(4, ${75 + strength * 20}%, ${66 - strength * 24}%, ${alpha + strength * 0.2})`;
+          }
+          if (link.label === 'ANALOGY') {
+            return `hsla(36, 78%, 62%, ${alpha + 0.14})`;
+          }
+          return `rgba(148, 163, 184, ${alpha + 0.08})`;
         }}
         linkWidth={(link: any) => {
-          const isHighlighted = highlightLinks.has(link);
-          const isHovered = hoverLink === link;
-          const baseWidth = (1 + (link.strength || 0.5) * 2.5);
-          return baseWidth * (isHovered ? 3 : (isHighlighted ? 2 : 1));
+          const baseWidth = graphMode === 'overview' ? 0.8 : 1.1;
+          const strengthBoost = (link.strength || 0.5) * (graphMode === 'overview' ? 1.2 : 1.7);
+          const highlightBoost = highlightLinks.has(link) ? 1.8 : 1;
+          return (baseWidth + strengthBoost) * highlightBoost;
         }}
       />
 
-      {/* Context Menu */}
-      {contextMenu && fgRef.current && (
-        (() => {
-          const coords = fgRef.current.graph2ScreenCoords(contextMenu.node.x, contextMenu.node.y);
-          return (
-            <div
-              className="absolute z-50 bg-background/95 backdrop-blur-md border border-border shadow-2xl rounded-lg py-1 w-48 animate-in fade-in zoom-in-95 duration-100 pointer-events-auto"
-              style={{ left: coords.x + 12, top: coords.y + 12 }}
-            >
-              <div className="px-3 py-2 border-b border-border/50">
-                <p className="text-xs font-bold text-muted-foreground truncate">{contextMenu.node.label}</p>
-              </div>
-              <button
-                onClick={() => handlePinNode(contextMenu.node)}
-                className="w-full text-left px-4 py-2 text-sm hover:bg-primary hover:text-primary-foreground transition-colors"
-              >
-                {contextMenu.node.fx !== undefined ? t('menu.unlock') : t('menu.pin')}
-              </button>
-              <button
-                onClick={() => handleShowNodeDetails(contextMenu.node)}
-                className="w-full text-left px-4 py-2 text-sm hover:bg-primary hover:text-primary-foreground transition-colors"
-              >
-                {t('menu.details')}
-              </button>
-              <button
-                onClick={() => handleExpandNode(contextMenu.node)}
-                className="w-full text-left px-4 py-2 text-sm hover:bg-primary hover:text-primary-foreground transition-colors"
-              >
-                {t('menu.aiExpand')}
-              </button>
-              <button
-                onClick={() => handleCustomExpand(contextMenu.node)}
-                className="w-full text-left px-4 py-2 text-sm hover:bg-primary hover:text-primary-foreground transition-colors"
-              >
-                {t('menu.customExpand')}
-              </button>
-              <button
-                onClick={() => handleStartConnection(contextMenu.node)}
-                className="w-full text-left px-4 py-2 text-sm hover:bg-emerald-600 hover:text-white transition-colors border-t border-border/30 mt-1"
-              >
-                {t('menu.connect')}
-              </button>
+      {contextMenu && fgRef.current && (() => {
+        const coords = fgRef.current.graph2ScreenCoords(contextMenu.node.x, contextMenu.node.y);
+        return (
+          <div
+            className="absolute z-50 w-48 rounded-lg border border-border bg-background/95 py-1 shadow-2xl backdrop-blur-md"
+            style={{ left: coords.x + 12, top: coords.y + 12 }}
+          >
+            <div className="border-b border-border/50 px-3 py-2">
+              <p className="truncate text-xs font-bold text-muted-foreground">{contextMenu.node.label}</p>
             </div>
-          );
-        })()
+            <button onClick={() => handlePinNode(contextMenu.node)} className="w-full px-4 py-2 text-left text-sm transition-colors hover:bg-primary hover:text-primary-foreground">
+              {contextMenu.node.fx !== undefined ? t('menu.unlock') : t('menu.pin')}
+            </button>
+            <button
+              onClick={() => {
+                setDetailCardNode(contextMenu.node);
+                setContextMenu(null);
+                onShowDetails?.(contextMenu.node.id);
+              }}
+              className="w-full px-4 py-2 text-left text-sm transition-colors hover:bg-primary hover:text-primary-foreground"
+            >
+              {t('menu.details')}
+            </button>
+            <button onClick={() => { onExpand?.(contextMenu.node.id); setContextMenu(null); }} className="w-full px-4 py-2 text-left text-sm transition-colors hover:bg-primary hover:text-primary-foreground">
+              {t('menu.aiExpand')}
+            </button>
+            <button onClick={() => handleCustomExpand(contextMenu.node)} className="w-full px-4 py-2 text-left text-sm transition-colors hover:bg-primary hover:text-primary-foreground">
+              {t('menu.customExpand')}
+            </button>
+            <button
+              onClick={() => {
+                setLinkingSource(contextMenu.node);
+                setCurrentPointerPos({ x: contextMenu.node.x, y: contextMenu.node.y });
+                setContextMenu(null);
+              }}
+              className="mt-1 w-full border-t border-border/30 px-4 py-2 text-left text-sm transition-colors hover:bg-emerald-600 hover:text-white"
+            >
+              {t('menu.connect')}
+            </button>
+          </div>
+        );
+      })()}
+
+      {linkContextMenu && (
+        <div className="absolute z-50 w-40 rounded-lg border border-border bg-background/95 py-1 shadow-2xl backdrop-blur-md" style={{ left: linkContextMenu.x + 10, top: linkContextMenu.y + 10 }}>
+          <div className="border-b border-border/50 px-3 py-2">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{t('menu.relManagement')}</p>
+          </div>
+          <button onClick={() => handleEditRelationship(linkContextMenu.link)} className="w-full px-4 py-2 text-left text-sm transition-colors hover:bg-primary hover:text-primary-foreground">{t('menu.editRel')}</button>
+          <button onClick={() => handleReverseRelationship(linkContextMenu.link)} className="w-full px-4 py-2 text-left text-sm transition-colors hover:bg-primary hover:text-primary-foreground">{t('menu.reverseRel')}</button>
+          <button onClick={() => void handleRelationshipDelete()} className="mt-1 w-full border-t border-border/30 px-4 py-2 text-left text-sm transition-colors hover:bg-destructive hover:text-destructive-foreground">{t('menu.deleteRel')}</button>
+        </div>
       )}
 
-      <CustomExpandModal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        sourceNode={modalNode}
-        onSubmit={handleModalSubmit}
-      />
+      <CustomExpandModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} sourceNode={modalNode} onSubmit={handleModalSubmit} />
 
       <RelationshipModal
         isOpen={isRelationshipModalOpen}
@@ -777,130 +685,60 @@ export default function IdiomGraph({ onExpand, onShowDetails, onSaveSuccess, isA
         onDelete={linkContextMenu ? handleRelationshipDelete : undefined}
       />
 
-      {/* Relationship Context Menu */}
-      {linkContextMenu && (
-        <div
-          className="absolute z-50 bg-background/95 backdrop-blur-md border border-border shadow-2xl rounded-lg py-1 w-40 animate-in fade-in zoom-in-95 duration-100 pointer-events-auto"
-          style={{ left: linkContextMenu.x + 10, top: linkContextMenu.y + 10 }}
-        >
-          <div className="px-3 py-2 border-b border-border/50">
-            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">{t('menu.relManagement')}</p>
-          </div>
-          <button
-            onClick={() => handleEditRelationship(linkContextMenu.link)}
-            className="w-full text-left px-4 py-2 text-sm hover:bg-primary hover:text-primary-foreground transition-colors"
-          >
-            {t('menu.editRel')}
-          </button>
-          <button
-            onClick={() => handleReverseRelationship(linkContextMenu.link)}
-            className="w-full text-left px-4 py-2 text-sm hover:bg-primary hover:text-primary-foreground transition-colors"
-          >
-            {t('menu.reverseRel')}
-          </button>
-          <button
-            onClick={() => handleRelationshipDelete()}
-            className="w-full text-left px-4 py-2 text-sm hover:bg-destructive hover:text-destructive-foreground transition-colors border-t border-border/30 mt-1"
-          >
-            {t('menu.deleteRel')}
-          </button>
-        </div>
-      )}
+      {detailCardNode && fgRef.current && (() => {
+        const coords = fgRef.current.graph2ScreenCoords(detailCardNode.x, detailCardNode.y);
+        return <NodeDetailCard idiomName={detailCardNode.id} x={coords.x} y={coords.y} onClose={() => setDetailCardNode(null)} />;
+      })()}
 
-      {detailCardNode && fgRef.current && (
-        (() => {
-          const coords = fgRef.current.graph2ScreenCoords(detailCardNode.x, detailCardNode.y);
-          return (
-            <NodeDetailCard
-              idiomName={detailCardNode.id}
-              x={coords.x}
-              y={coords.y}
-              onClose={() => setDetailCardNode(null)}
-            />
-          );
-        })()
-      )}
+      {hoverCardNode && !detailCardNode && !contextMenu && !linkContextMenu && fgRef.current && (() => {
+        const coords = fgRef.current.graph2ScreenCoords(hoverCardNode.x, hoverCardNode.y);
+        return <NodeDetailCard idiomName={hoverCardNode.id} x={coords.x} y={coords.y} onClose={() => undefined} isHover={true} />;
+      })()}
 
-      {hoverCardNode && !detailCardNode && !contextMenu && !linkContextMenu && fgRef.current && (
-        (() => {
-          const coords = fgRef.current.graph2ScreenCoords(hoverCardNode.x, hoverCardNode.y);
-          return (
-            <NodeDetailCard
-              idiomName={hoverCardNode.id}
-              x={coords.x}
-              y={coords.y}
-              onClose={() => { }}
-              isHover={true}
-              onMouseEnter={handleHoverNodeCardEnter}
-              onMouseLeave={handleHoverNodeCardLeave}
-            />
-          );
-        })()
-      )}
+      {hoverCardLink && !detailCardNode && !contextMenu && !linkContextMenu && fgRef.current && (() => {
+        const sourceNode = typeof hoverCardLink.source === 'object' ? hoverCardLink.source : data.nodes.find((node) => node.id === hoverCardLink.source);
+        const targetNode = typeof hoverCardLink.target === 'object' ? hoverCardLink.target : data.nodes.find((node) => node.id === hoverCardLink.target);
+        if (!sourceNode || !targetNode || typeof sourceNode.x !== 'number' || typeof sourceNode.y !== 'number' || typeof targetNode.x !== 'number' || typeof targetNode.y !== 'number') {
+          return null;
+        }
+        const coords = fgRef.current.graph2ScreenCoords((sourceNode.x + targetNode.x) / 2, (sourceNode.y + targetNode.y) / 2);
+        return (
+          <RelationshipDetailCard
+            relation={hoverCardLink}
+            sourceIdiom={sourceNode.id}
+            targetIdiom={targetNode.id}
+            relationLabel={relationLabelMap[hoverCardLink.label] || hoverCardLink.label}
+            x={coords.x}
+            y={coords.y}
+          />
+        );
+      })()}
 
-      {hoverCardLink && !detailCardNode && !contextMenu && !linkContextMenu && fgRef.current && (
-        (() => {
-          const sourceNode = typeof hoverCardLink.source === 'object'
-            ? hoverCardLink.source
-            : data.nodes.find((node) => node.id === hoverCardLink.source);
-          const targetNode = typeof hoverCardLink.target === 'object'
-            ? hoverCardLink.target
-            : data.nodes.find((node) => node.id === hoverCardLink.target);
-
-          if (
-            !sourceNode ||
-            !targetNode ||
-            typeof sourceNode.x !== 'number' ||
-            typeof sourceNode.y !== 'number' ||
-            typeof targetNode.x !== 'number' ||
-            typeof targetNode.y !== 'number'
-          ) {
-            return null;
-          }
-
-          const coords = fgRef.current.graph2ScreenCoords(
-            (sourceNode.x + targetNode.x) / 2,
-            (sourceNode.y + targetNode.y) / 2
-          );
-
-          return (
-            <RelationshipDetailCard
-              relation={hoverCardLink}
-              sourceIdiom={sourceNode.id}
-              targetIdiom={targetNode.id}
-              relationLabel={relationLabelMap[hoverCardLink.label] || hoverCardLink.label}
-              x={coords.x}
-              y={coords.y}
-              onMouseEnter={handleHoverLinkCardEnter}
-              onMouseLeave={handleHoverLinkCardLeave}
-            />
-          );
-        })()
-      )}
-
-      {/* Floating Zoom Controls */}
-      <div className="absolute bottom-6 right-6 flex flex-col gap-2 z-10">
-        <button
-          onClick={handleZoomIn}
-          className="bg-background/80 backdrop-blur border border-border shadow-lg rounded-xl p-2.5 hover:bg-muted transition-all hover:scale-105 active:scale-95"
-          title={t('zoomIn')}
-        >
+      <div className="absolute bottom-6 right-6 z-10 flex flex-col gap-2">
+        <button onClick={handleZoomIn} className="rounded-xl border border-border bg-background/80 p-2.5 shadow-lg backdrop-blur transition-all hover:scale-105 hover:bg-muted active:scale-95" title={t('zoomIn')}>
           <ZoomIn className="h-5 w-5 text-foreground" />
         </button>
-        <button
-          onClick={handleZoomOut}
-          className="bg-background/80 backdrop-blur border border-border shadow-lg rounded-xl p-2.5 hover:bg-muted transition-all hover:scale-105 active:scale-95"
-          title={t('zoomOut')}
-        >
+        <button onClick={handleZoomOut} className="rounded-xl border border-border bg-background/80 p-2.5 shadow-lg backdrop-blur transition-all hover:scale-105 hover:bg-muted active:scale-95" title={t('zoomOut')}>
           <ZoomOut className="h-5 w-5 text-foreground" />
         </button>
-        <button
-          onClick={handleZoomToFit}
-          className="bg-background/80 backdrop-blur border border-border shadow-lg rounded-xl p-2.5 hover:bg-muted transition-all hover:scale-105 active:scale-95"
-          title={t('zoomToFit')}
-        >
+        <button onClick={handleZoomToFit} className="rounded-xl border border-border bg-background/80 p-2.5 shadow-lg backdrop-blur transition-all hover:scale-105 hover:bg-muted active:scale-95" title={t('zoomToFit')}>
           <Maximize className="h-5 w-5 text-foreground" />
         </button>
+        {onExpand && graphCenter && (
+          <button onClick={() => onExpand(graphCenter)} className="rounded-xl border border-primary/30 bg-primary/10 p-2.5 text-primary shadow-lg backdrop-blur transition-all hover:scale-105 hover:bg-primary/15 active:scale-95" title={t('menu.aiExpand')}>
+            <Compass className="h-5 w-5" />
+          </button>
+        )}
+        {graphMode !== 'overview' && onExpandFocusedGraph && (
+          <button onClick={onExpandFocusedGraph} className="rounded-xl border border-primary/30 bg-primary/10 p-2.5 text-primary shadow-lg backdrop-blur transition-all hover:scale-105 hover:bg-primary/15 active:scale-95" title={copy.expandMore}>
+            <Plus className="h-5 w-5" />
+          </button>
+        )}
+        {graphMode !== 'overview' && onReturnToOverview && (
+          <button onClick={onReturnToOverview} className="rounded-xl border border-border bg-background/80 p-2.5 shadow-lg backdrop-blur transition-all hover:scale-105 hover:bg-muted active:scale-95" title={copy.backToOverview}>
+            <Orbit className="h-5 w-5 text-foreground" />
+          </button>
+        )}
       </div>
     </div>
   );

@@ -34,6 +34,7 @@ type GraphNode struct {
 	Type       string `json:"type,omitempty"`
 	Emotion    string `json:"emotion,omitempty"`
 	HasMeaning bool   `json:"hasMeaning"`
+	Degree     int    `json:"degree,omitempty"`
 }
 
 type GraphLink struct {

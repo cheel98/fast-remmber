@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -135,6 +136,10 @@ func RegisterUser(c *gin.Context) {
 		return
 	}
 
+	if err := database.EnsureUserSeedGraph(c.Request.Context(), user.Username); err != nil {
+		log.Printf("Warning: failed to provision seeded idiom graph for registered user %s: %v", user.Username, err)
+	}
+
 	token, err := signAuthToken(user.Username)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to issue auth token"})
@@ -172,6 +177,10 @@ func LoginUser(c *gin.Context) {
 		return
 	}
 
+	if err := database.EnsureUserSeedGraph(c.Request.Context(), record.Username); err != nil {
+		log.Printf("Warning: failed to provision seeded idiom graph for login user %s: %v", record.Username, err)
+	}
+
 	token, err := signAuthToken(record.Username)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to issue auth token"})
@@ -180,7 +189,7 @@ func LoginUser(c *gin.Context) {
 
 	c.JSON(http.StatusOK, models.AuthResponse{
 		Token: token,
-		User: mustBuildAuthUser(record),
+		User:  mustBuildAuthUser(record),
 	})
 }
 
@@ -261,6 +270,10 @@ func mustBuildAuthUser(record *userRecord) models.AuthUser {
 }
 
 func hydrateAuthUser(ctx context.Context, user models.AuthUser) (models.AuthUser, error) {
+	if err := database.EnsureUserSeedGraph(ctx, user.Username); err != nil {
+		log.Printf("Warning: failed to ensure seeded idiom graph for user %s: %v", user.Username, err)
+	}
+
 	stats, err := fetchAuthUserStats(ctx, user.Username)
 	if err != nil {
 		return models.AuthUser{}, err

@@ -35,6 +35,7 @@ export interface GraphNode {
   type?: string;
   emotion?: string;
   hasMeaning?: boolean;
+  degree?: number;
   val?: number;
 }
 
@@ -52,6 +53,17 @@ export interface GraphLink {
 export interface GraphData {
   nodes: GraphNode[];
   links: GraphLink[];
+}
+
+export type GraphQueryMode = 'overview' | 'focus';
+export type GraphRelationLabel = 'SYNONYM' | 'ANTONYM' | 'RELATED' | 'ANALOGY';
+
+export interface FetchGraphOptions {
+  mode?: GraphQueryMode;
+  center?: string;
+  depth?: 0 | 1 | 2;
+  limit?: number;
+  labels?: GraphRelationLabel[];
 }
 
 export interface AuthUserStats {
@@ -273,16 +285,44 @@ export const saveIdiom = async (data: IdiomResult): Promise<void> => {
   );
 };
 
-export const fetchGraph = async (): Promise<GraphData> => {
+export const fetchGraph = async (options: FetchGraphOptions = {}): Promise<GraphData> => {
+  const searchParams = new URLSearchParams();
+
+  if (options.mode) {
+    searchParams.set('mode', options.mode);
+  }
+  if (options.center) {
+    searchParams.set('center', options.center);
+  }
+  if (typeof options.depth === 'number') {
+    searchParams.set('depth', String(options.depth));
+  }
+  if (typeof options.limit === 'number') {
+    searchParams.set('limit', String(options.limit));
+  }
+  if (options.labels && options.labels.length > 0) {
+    searchParams.set('labels', options.labels.join(','));
+  }
+
+  const queryString = searchParams.toString();
   const response = await request(
-    '/graph',
+    `/graph${queryString ? `?${queryString}` : ''}`,
     { method: 'GET' },
     'Failed to fetch graph data',
     { requireAuth: true },
   );
 
   const data = await response.json();
-  data.nodes = data.nodes.map((node: GraphNode) => ({ ...node, val: 1.5 }));
+  const degreeMap = new Map<string, number>();
+  for (const link of data.links as GraphLink[]) {
+    degreeMap.set(link.source, (degreeMap.get(link.source) ?? 0) + 1);
+    degreeMap.set(link.target, (degreeMap.get(link.target) ?? 0) + 1);
+  }
+  data.nodes = data.nodes.map((node: GraphNode) => ({
+    ...node,
+    degree: degreeMap.get(node.id) ?? 0,
+    val: 1.5,
+  }));
   return data;
 };
 
