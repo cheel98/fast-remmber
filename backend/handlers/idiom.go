@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"fast-remmber-backend/database"
@@ -27,6 +28,16 @@ func AnalyzeIdiom(c *gin.Context) {
 	var req ProcessRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := ensureUserCanUseAISearch(c.Request.Context(), user.Username); err != nil {
+		if errors.Is(err, errAISearchBalanceExhausted) {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify AI search balance"})
 		return
 	}
 

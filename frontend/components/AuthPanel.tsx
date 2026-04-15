@@ -50,14 +50,14 @@ export default function AuthPanel({
               <p className="text-xs text-muted-foreground">{currentUser.username}</p>
             </div>
           </div>
-          <button
+          {/* <button
             type="button"
             onClick={onLogout}
             className="inline-flex items-center gap-1 rounded-full border border-border/50 px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors"
           >
             <LogOut className="h-3.5 w-3.5" />
             <span>{t('logout')}</span>
-          </button>
+          </button> */}
         </div>
         <p className="text-xs text-muted-foreground">{t('authReadyHint')}</p>
       </div>

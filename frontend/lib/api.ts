@@ -54,10 +54,19 @@ export interface GraphData {
   links: GraphLink[];
 }
 
+export interface AuthUserStats {
+  discoveryCount: number;
+  aiSearchesUsed: number;
+  aiSearchesLimit: number | null;
+  aiSearchesRemaining: number | null;
+  unlimitedAISearches: boolean;
+}
+
 export interface AuthUser {
   id: string;
   username: string;
   createdAt: string;
+  stats: AuthUserStats;
 }
 
 export interface AuthResponse {
@@ -71,6 +80,40 @@ export interface DiscoveryRecord {
   createdAt: string;
   result: IdiomResult;
 }
+
+const DEFAULT_AUTH_USER_STATS: AuthUserStats = {
+  discoveryCount: 0,
+  aiSearchesUsed: 0,
+  aiSearchesLimit: null,
+  aiSearchesRemaining: null,
+  unlimitedAISearches: true,
+};
+
+const normalizeAuthUser = (user: Partial<AuthUser> | null | undefined): AuthUser => {
+  const rawStats = user?.stats;
+  const aiSearchesLimit =
+    typeof rawStats?.aiSearchesLimit === 'number' ? rawStats.aiSearchesLimit : null;
+  const aiSearchesRemaining =
+    typeof rawStats?.aiSearchesRemaining === 'number' ? rawStats.aiSearchesRemaining : null;
+
+  return {
+    id: user?.id ?? '',
+    username: user?.username ?? '',
+    createdAt: user?.createdAt ?? '',
+    stats: {
+      discoveryCount:
+        typeof rawStats?.discoveryCount === 'number' ? rawStats.discoveryCount : DEFAULT_AUTH_USER_STATS.discoveryCount,
+      aiSearchesUsed:
+        typeof rawStats?.aiSearchesUsed === 'number' ? rawStats.aiSearchesUsed : DEFAULT_AUTH_USER_STATS.aiSearchesUsed,
+      aiSearchesLimit,
+      aiSearchesRemaining,
+      unlimitedAISearches:
+        typeof rawStats?.unlimitedAISearches === 'boolean'
+          ? rawStats.unlimitedAISearches
+          : aiSearchesLimit === null,
+    },
+  };
+};
 
 export const getStoredAuthToken = (): string | null => {
   if (typeof window === 'undefined') {
@@ -155,7 +198,11 @@ export const registerUser = async (username: string, password: string): Promise<
     { includeJsonContentType: true },
   );
 
-  return response.json();
+  const payload = await response.json();
+  return {
+    token: payload.token,
+    user: normalizeAuthUser(payload.user),
+  };
 };
 
 export const loginUser = async (username: string, password: string): Promise<AuthResponse> => {
@@ -169,7 +216,11 @@ export const loginUser = async (username: string, password: string): Promise<Aut
     { includeJsonContentType: true },
   );
 
-  return response.json();
+  const payload = await response.json();
+  return {
+    token: payload.token,
+    user: normalizeAuthUser(payload.user),
+  };
 };
 
 export const fetchCurrentUser = async (): Promise<AuthUser> => {
@@ -181,7 +232,7 @@ export const fetchCurrentUser = async (): Promise<AuthUser> => {
   );
 
   const payload = await response.json();
-  return payload.user;
+  return normalizeAuthUser(payload.user);
 };
 
 export const fetchDiscoveryHistory = async (limit: number = 20): Promise<DiscoveryRecord[]> => {

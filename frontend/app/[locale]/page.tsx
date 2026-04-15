@@ -1,9 +1,9 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Search, Loader2, Save, ChevronLeft, Menu, Compass, Pencil, X, Check, Trash2, BookOpen, Activity, TrendingUp, TrendingDown, Smile, Frown, Meh, UserRound, Plus, Minus, Pin, PinOff } from 'lucide-react';
+import { Search, Loader2, Save, ChevronLeft, Menu, Compass, Pencil, X, Check, Trash2, BookOpen, Activity, TrendingUp, TrendingDown, Smile, Frown, Meh, Plus, Minus, Pin, PinOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import IdiomGraph from '@/components/IdiomGraph';
 import LanguageSwitcher from '@/components/LanguageSwitcher';
@@ -12,6 +12,7 @@ import UsageExamples from '@/components/UsageExamples';
 import RelatedIdiomCard from '@/components/RelatedIdiomCard';
 import AuthPanel from '@/components/AuthPanel';
 import DiscoveryHistory from '@/components/DiscoveryHistory';
+import UserBalanceBubble from '@/components/UserBalanceBubble';
 import { analyzeIdiom, saveIdiom, IdiomResult, fetchIdiomDetail, deleteIdiom, loginUser, registerUser, fetchCurrentUser, fetchDiscoveryHistory, clearStoredAuthToken, setStoredAuthToken, getStoredAuthToken, AuthUser, DiscoveryRecord } from '@/lib/api';
 
 type AuthMode = 'login' | 'register';
@@ -47,6 +48,7 @@ const areSetsEqual = (left: Set<string>, right: Set<string>) =>
 
 export default function Home() {
   const t = useTranslations('HomePage');
+  const locale = useLocale();
   const [query, setQuery] = useState('');
   // Discovery (AI Analysis) state
   const [analysisResult, setAnalysisResult] = useState<IdiomResult | null>(null);
@@ -128,6 +130,17 @@ export default function Home() {
     }
   };
 
+  const refreshCurrentUser = async () => {
+    if (!getStoredAuthToken()) {
+      setCurrentUser(null);
+      return null;
+    }
+
+    const user = await fetchCurrentUser();
+    setCurrentUser(user);
+    return user;
+  };
+
   const syncSavedGraphState = async (idiom: string) => {
     if (!currentUser || !idiom.trim()) {
       setSavedSyns(new Set());
@@ -160,8 +173,7 @@ export default function Home() {
       }
 
       try {
-        const user = await fetchCurrentUser();
-        setCurrentUser(user);
+        await refreshCurrentUser();
         await loadDiscoveryHistory();
       } catch {
         clearStoredAuthToken();
@@ -275,9 +287,26 @@ export default function Home() {
     return false;
   };
 
+  const canUseAISearch = currentUser
+    ? currentUser.stats.unlimitedAISearches || (currentUser.stats.aiSearchesRemaining ?? 0) > 0
+    : false;
+
+  const ensureCanPerformAISearch = () => {
+    if (!ensureAuthenticated()) {
+      return false;
+    }
+
+    if (!canUseAISearch) {
+      setError(locale === 'zh' ? 'AI 搜索额度已用完' : 'AI search balance is exhausted.');
+      return false;
+    }
+
+    return true;
+  };
+
   const performSearch = async (searchTerm: string) => {
     if (!searchTerm.trim()) return;
-    if (!ensureAuthenticated()) return;
+    if (!ensureCanPerformAISearch()) return;
 
     setActiveTab('discovery');
     setLoading(true);
@@ -289,8 +318,11 @@ export default function Home() {
     try {
       const res = await analyzeIdiom(searchTerm.trim());
       applyAnalysisResult(res, searchTerm);
-      await syncSavedGraphState(res.idiom);
-      await loadDiscoveryHistory();
+      await Promise.all([
+        syncSavedGraphState(res.idiom),
+        loadDiscoveryHistory(),
+        refreshCurrentUser(),
+      ]);
     } catch (err: any) {
       setError(err.message || t('saveError'));
     } finally {
@@ -546,6 +578,10 @@ export default function Home() {
     );
   };
 
+  const headerContext = inspectorResult?.idiom ||
+    analysisResult?.idiom ||
+    (authInitializing ? t('authChecking') : currentUser ? t('authReadyHint') : t('guestMode'));
+
   return (
     <main className="flex min-h-screen flex-col bg-background text-foreground">
       <div
@@ -567,19 +603,22 @@ export default function Home() {
           !isTopBarVisible && "pointer-events-none"
         )}
       >
-        <div className="min-w-0 flex items-center gap-2">
-          {currentUser ? (
-            <div className="flex items-center gap-2 rounded-full border border-border/60 bg-background/80 px-3 py-1.5 shadow-sm">
-              <UserRound className="h-4 w-4 text-primary" />
-              <span className="max-w-[140px] truncate text-sm font-medium">{currentUser.username}</span>
-            </div>
-          ) : (
-            <span className="truncate text-sm text-muted-foreground">
-              {authInitializing ? t('authChecking') : t('guestMode')}
+        {/* <div className="min-w-0 flex items-center gap-2">
+          <div className="flex items-center gap-2 rounded-full border border-border/60 bg-background/80 px-3 py-1.5 shadow-sm">
+            {activeTab === 'discovery' ? (
+              <Compass className="h-4 w-4 text-primary" />
+            ) : (
+              <BookOpen className="h-4 w-4 text-primary" />
+            )}
+            <span className="text-sm font-medium">
+              {activeTab === 'discovery' ? t('discovery') : t('inspector')}
             </span>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
+          </div>
+          <span className="hidden max-w-[180px] truncate text-xs text-muted-foreground md:inline">
+            {headerContext}
+          </span>
+        </div> */}
+        <div className="mx-auto flex shrink-0 items-center gap-2">
           <button
             type="button"
             onClick={handleGraphPinToggle}
@@ -689,12 +728,12 @@ export default function Home() {
                 placeholder={t('searchPlaceholder')}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                disabled={!currentUser}
+                disabled={!currentUser || !canUseAISearch}
                 className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
               />
               <button
                 type="submit"
-                disabled={loading || !currentUser}
+                disabled={loading || !canUseAISearch}
                 className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2"
               >
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
@@ -702,6 +741,11 @@ export default function Home() {
               </button>
             </form>
             {!currentUser && <p className="text-xs text-muted-foreground">{t('authRequiredHint')}</p>}
+            {currentUser && !canUseAISearch && (
+              <p className="text-xs font-medium text-amber-600">
+                {locale === 'zh' ? 'AI 搜索额度已用完' : 'AI search balance is exhausted.'}
+              </p>
+            )}
             {error && <p className="text-sm text-destructive font-medium">{error}</p>}
           </div>
 
@@ -737,7 +781,7 @@ export default function Home() {
                               <button
                                 onClick={() => performSearch(analysisResult.idiom)}
                                 className="p-1.5 hover:bg-primary/10 rounded-md text-primary transition-colors flex items-center gap-1.5 text-xs font-medium"
-                                disabled={loading}
+                                disabled={loading || !canUseAISearch}
                                 title={t('aiExplore')}
                               >
                                 <Compass className={cn("h-4 w-4", loading && "animate-spin")} />
@@ -925,7 +969,7 @@ export default function Home() {
                             <button
                               onClick={() => performSearch(inspectorResult.idiom)}
                               className="p-1.5 hover:bg-primary/10 rounded-md text-primary transition-colors flex items-center gap-1.5 text-xs font-medium"
-                              disabled={loading || !currentUser}
+                              disabled={loading || !canUseAISearch}
                               title={t('aiExplore')}
                             >
                               <Compass className={cn("h-4 w-4", loading && "animate-spin")} />
@@ -1094,6 +1138,11 @@ export default function Home() {
           </div>
         </section>
       </div>
+      <UserBalanceBubble
+        currentUser={currentUser}
+        authInitializing={authInitializing}
+        onLogout={handleLogout}
+      />
     </main>
   );
 }

@@ -14,7 +14,6 @@ const _geistMono = Geist_Mono({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: '成语语义神经网络 | Idiom Neural Graph',
   description: 'Interactive visualization of Chinese idiom semantic networks',
-  generator: 'v0.app',
   icons: {
     icon: [
       {

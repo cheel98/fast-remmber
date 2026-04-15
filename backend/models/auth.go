@@ -5,10 +5,19 @@ type AuthCredentialsRequest struct {
 	Password string `json:"password"`
 }
 
+type AuthUserStats struct {
+	DiscoveryCount      int  `json:"discoveryCount"`
+	AISearchesUsed      int  `json:"aiSearchesUsed"`
+	AISearchesLimit     *int `json:"aiSearchesLimit"`
+	AISearchesRemaining *int `json:"aiSearchesRemaining"`
+	UnlimitedAISearches bool `json:"unlimitedAISearches"`
+}
+
 type AuthUser struct {
 	ID        string `json:"id"`
 	Username  string `json:"username"`
 	CreatedAt string `json:"createdAt"`
+	Stats     AuthUserStats `json:"stats"`
 }
 
 type AuthResponse struct {

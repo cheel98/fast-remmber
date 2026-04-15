@@ -37,6 +37,10 @@ type userRecord struct {
 	CreatedAt    string
 }
 
+const aiSearchLimitEnvKey = "AI_SEARCH_LIMIT"
+
+var errAISearchBalanceExhausted = errors.New("AI search balance exhausted")
+
 func RegisterUser(c *gin.Context) {
 	if database.Driver == nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Neo4j is not connected"})
@@ -65,6 +69,7 @@ func RegisterUser(c *gin.Context) {
 		ID:        newID("usr"),
 		Username:  username,
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		Stats:     buildAuthUserStats(0),
 	}
 
 	ctx := context.Background()
@@ -175,11 +180,7 @@ func LoginUser(c *gin.Context) {
 
 	c.JSON(http.StatusOK, models.AuthResponse{
 		Token: token,
-		User: models.AuthUser{
-			ID:        record.ID,
-			Username:  record.Username,
-			CreatedAt: record.CreatedAt,
-		},
+		User: mustBuildAuthUser(record),
 	})
 }
 
@@ -190,7 +191,13 @@ func GetCurrentUser(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"user": user})
+	currentUser, err := hydrateAuthUser(c.Request.Context(), user)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch current user"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"user": currentUser})
 }
 
 func AuthMiddleware() gin.HandlerFunc {
@@ -235,6 +242,117 @@ func currentUserFromContext(c *gin.Context) (models.AuthUser, bool) {
 
 	user, ok := value.(models.AuthUser)
 	return user, ok
+}
+
+func mustBuildAuthUser(record *userRecord) models.AuthUser {
+	baseUser := models.AuthUser{
+		ID:        record.ID,
+		Username:  record.Username,
+		CreatedAt: record.CreatedAt,
+	}
+
+	user, err := hydrateAuthUser(context.Background(), baseUser)
+	if err != nil {
+		baseUser.Stats = buildAuthUserStats(0)
+		return baseUser
+	}
+
+	return user
+}
+
+func hydrateAuthUser(ctx context.Context, user models.AuthUser) (models.AuthUser, error) {
+	stats, err := fetchAuthUserStats(ctx, user.Username)
+	if err != nil {
+		return models.AuthUser{}, err
+	}
+
+	user.Stats = stats
+	return user, nil
+}
+
+func fetchAuthUserStats(ctx context.Context, username string) (models.AuthUserStats, error) {
+	if database.Driver == nil {
+		return buildAuthUserStats(0), nil
+	}
+
+	session := database.Driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeRead})
+	defer session.Close(ctx)
+
+	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+		res, err := tx.Run(ctx,
+			`MATCH (u:User {username: $username})
+			 OPTIONAL MATCH (u)-[:MADE_DISCOVERY]->(d:Discovery)
+			 RETURN count(d) AS discoveryCount`,
+			map[string]any{"username": username})
+		if err != nil {
+			return nil, err
+		}
+		if !res.Next(ctx) {
+			return 0, nil
+		}
+
+		record := res.Record()
+		discoveryCount, _ := record.Get("discoveryCount")
+		return intValue(discoveryCount, 0), nil
+	})
+	if err != nil {
+		return models.AuthUserStats{}, err
+	}
+
+	return buildAuthUserStats(result.(int)), nil
+}
+
+func buildAuthUserStats(discoveryCount int) models.AuthUserStats {
+	configuredLimit := configuredAISearchLimit()
+	var remaining *int
+	unlimited := configuredLimit == nil
+
+	if configuredLimit != nil {
+		remainingValue := *configuredLimit - discoveryCount
+		if remainingValue < 0 {
+			remainingValue = 0
+		}
+		remaining = &remainingValue
+	}
+
+	return models.AuthUserStats{
+		DiscoveryCount:      discoveryCount,
+		AISearchesUsed:      discoveryCount,
+		AISearchesLimit:     configuredLimit,
+		AISearchesRemaining: remaining,
+		UnlimitedAISearches: unlimited,
+	}
+}
+
+func ensureUserCanUseAISearch(ctx context.Context, username string) error {
+	stats, err := fetchAuthUserStats(ctx, username)
+	if err != nil {
+		return err
+	}
+
+	if stats.UnlimitedAISearches {
+		return nil
+	}
+
+	if stats.AISearchesRemaining != nil && *stats.AISearchesRemaining > 0 {
+		return nil
+	}
+
+	return errAISearchBalanceExhausted
+}
+
+func configuredAISearchLimit() *int {
+	rawLimit := strings.TrimSpace(os.Getenv(aiSearchLimitEnvKey))
+	if rawLimit == "" {
+		return nil
+	}
+
+	parsedLimit, err := strconv.Atoi(rawLimit)
+	if err != nil || parsedLimit <= 0 {
+		return nil
+	}
+
+	return &parsedLimit
 }
 
 func findUserByUsername(ctx context.Context, username string) (*userRecord, error) {
@@ -391,6 +509,23 @@ func float64Value(value any, defaultValue float64) float64 {
 		return float64(typedValue)
 	case int32:
 		return float64(typedValue)
+	default:
+		return defaultValue
+	}
+}
+
+func intValue(value any, defaultValue int) int {
+	switch typedValue := value.(type) {
+	case int:
+		return typedValue
+	case int64:
+		return int(typedValue)
+	case int32:
+		return int(typedValue)
+	case float64:
+		return int(typedValue)
+	case float32:
+		return int(typedValue)
 	default:
 		return defaultValue
 	}
