@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Search, Loader2, Save, ChevronLeft, Menu, Compass, Pencil, X, Check, Trash2, BookOpen, Activity, TrendingUp, TrendingDown, Smile, Frown, Meh, Plus, Minus } from 'lucide-react';
+import { Search, Loader2, Save, ChevronLeft, Menu, Compass, Pencil, X, Check, Trash2, BookOpen, Activity, TrendingUp, TrendingDown, Smile, Frown, Meh, Plus, Minus, ImagePlus } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLocale, useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
@@ -14,7 +14,8 @@ import RelatedIdiomCard from '@/components/RelatedIdiomCard';
 import AuthPanel from '@/components/AuthPanel';
 import DiscoveryHistory from '@/components/DiscoveryHistory';
 import UserBalanceBubble from '@/components/UserBalanceBubble';
-import { analyzeIdiom, saveIdiom, IdiomResult, fetchIdiomDetail, deleteIdiom, loginUser, registerUser, fetchCurrentUser, fetchDiscoveryHistory, clearStoredAuthToken, setStoredAuthToken, getStoredAuthToken, AuthUser, DiscoveryRecord, GraphRelationLabel } from '@/lib/api';
+import { analyzeIdiom, saveIdiom, analyzeImage, IdiomResult, fetchIdiomDetail, deleteIdiom, loginUser, registerUser, fetchCurrentUser, fetchDiscoveryHistory, clearStoredAuthToken, setStoredAuthToken, getStoredAuthToken, AuthUser, DiscoveryRecord, GraphRelationLabel, ImageParseResponse } from '@/lib/api';
+
 
 type AuthMode = 'login' | 'register';
 type Tone = 'positive' | 'negative' | 'neutral';
@@ -75,7 +76,7 @@ export default function Home() {
   const [inspectorResult, setInspectorResult] = useState<IdiomResult | null>(null);
 
   // UI State
-  const [activeTab, setActiveTab] = useState<'discovery' | 'inspector'>('discovery');
+  const [activeTab, setActiveTab] = useState<'discovery' | 'inspector' | 'image-analysis'>('discovery');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -112,6 +113,13 @@ export default function Home() {
   const [graphPinnedHeight, setGraphPinnedHeight] = useState<number | null>(null);
   const [graphPinnedTop, setGraphPinnedTop] = useState<number | null>(null);
   const [graphPinnedStyle, setGraphPinnedStyle] = useState<React.CSSProperties>({});
+  
+  // Image Analysis State
+  const [imageAnalyzing, setImageAnalyzing] = useState(false);
+  const [imageParseResult, setImageParseResult] = useState<ImageParseResponse | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const lastScrollYRef = useRef(0);
   const graphSectionRef = useRef<HTMLDivElement>(null);
   const graphViewportRef = useRef<HTMLDivElement>(null);
@@ -469,6 +477,66 @@ export default function Home() {
     void performSearch(query);
   };
 
+  const processImageFile = async (file: File) => {
+    if (!ensureCanPerformAISearch()) {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const base64 = event.target?.result as string;
+      if (!base64) return;
+
+      setImagePreviewUrl(base64);
+      setImageAnalyzing(true);
+      setError(null);
+      setImageParseResult(null); // Clear previous result while loading
+      
+      // Auto switch to image-analysis tab to see loading & result
+      if (activeTab !== 'image-analysis') {
+        setActiveTab('image-analysis');
+      }
+
+      try {
+        const result = await analyzeImage(base64);
+        setImageParseResult(result);
+        await Promise.all([
+          refreshCurrentUser(),
+        ]);
+      } catch (err: any) {
+        setError(err.message || t('saveError') || 'Failed to analyze image');
+      } finally {
+        setImageAnalyzing(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      await processImageFile(file);
+    }
+  };
+
+  const handlePaste = async (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        const file = items[i].getAsFile();
+        if (file) {
+          e.preventDefault();
+          await processImageFile(file);
+          break;
+        }
+      }
+    }
+  };
+
   const handleAuthSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
@@ -787,7 +855,7 @@ export default function Home() {
         {/* Left Panel: Search & Info */}
         <aside
           className={cn(
-            "w-full lg:w-96 flex-shrink-0 border-r border-border/40 bg-muted/10 p-6 flex flex-col gap-6 overflow-y-auto transition-all duration-300 ease-in-out",
+            "w-full lg:w-96 flex-shrink-0 border-r border-border/40 bg-muted/10 p-6 pb-[5.5rem] flex flex-col gap-6 overflow-y-auto transition-all duration-300 ease-in-out",
             isCollapsed && "lg:-ml-96 lg:opacity-0 pointer-events-none"
           )}
         >
@@ -844,21 +912,59 @@ export default function Home() {
                   />
                 )}
               </button>
+              <button
+                onClick={() => setActiveTab('image-analysis')}
+                className={cn(
+                  "px-4 py-2 text-sm font-medium transition-colors relative",
+                  activeTab === 'image-analysis' ? "text-primary" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {locale === 'zh' ? '图片解析' : 'Image Analysis'}
+                {imageParseResult && <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-primary rounded-full animate-pulse z-10" />}
+                {activeTab === 'image-analysis' && (
+                  <motion.div
+                    layoutId="activeTab"
+                    className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary"
+                    transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                  />
+                )}
+              </button>
             </div>
 
             <form onSubmit={handleSearch} className="flex gap-2 relative">
-              <input
-                type="text"
-                placeholder={t('searchPlaceholder')}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                disabled={!currentUser || !canUseAISearch}
-                className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
-              />
+              <div className="flex bg-background border border-input rounded-md ring-offset-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 w-full pl-3 pr-1 py-1 h-10 items-center">
+                <input
+                  type="text"
+                  placeholder={locale === 'zh' ? '搜索... (也可直接 Ctrl+V 粘贴分析图片)' : 'Search... (Ctrl+V to paste & analyze image)'}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onPaste={handlePaste}
+                  disabled={!currentUser || !canUseAISearch || loading || imageAnalyzing}
+                  className="flex-1 bg-transparent text-sm placeholder:text-muted-foreground focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed border-none min-w-0"
+                />
+                
+                <input
+                  type="file"
+                  accept="image/*"
+                  ref={fileInputRef}
+                  onChange={handleImageUpload}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={!currentUser || !canUseAISearch || loading || imageAnalyzing}
+                  title="Upload exam image"
+                  className="inline-flex shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground h-8 w-8 transition-colors disabled:opacity-50 disabled:pointer-events-none"
+                >
+                  {imageAnalyzing ? <Loader2 className="h-4 w-4 animate-spin text-primary" /> : <ImagePlus className="h-4 w-4" />}
+                </button>
+              </div>
+
               <button
                 type="submit"
-                disabled={loading || !canUseAISearch}
-                className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2"
+                disabled={loading || !canUseAISearch || imageAnalyzing}
+                className="inline-flex shrink-0 items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2"
               >
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                 <span className="sr-only">Search</span>
@@ -1223,6 +1329,66 @@ export default function Home() {
                       </div>
                     </div>
                   </div>
+                ) : activeTab === 'image-analysis' ? (
+                  <motion.div
+                    key="image-analysis"
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 10 }}
+                    transition={{ duration: 0.2, ease: "easeInOut" }}
+                    className="flex flex-col gap-6"
+                  >
+                    <input
+                      type="file"
+                      accept="image/*"
+                      ref={fileInputRef}
+                      onChange={handleImageUpload}
+                      className="hidden"
+                    />
+
+                    {imagePreviewUrl ? (
+                      <div className="relative group rounded-lg overflow-hidden border border-border mt-2">
+                        <img src={imagePreviewUrl} alt="Preview" className="w-full h-auto object-contain max-h-[300px] bg-muted/20" />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                          <button
+                            onClick={() => fileInputRef.current?.click()}
+                            disabled={imageAnalyzing}
+                            className="bg-background text-foreground px-4 py-2 rounded shadow text-sm font-medium hover:bg-muted transition-colors"
+                          >
+                            {locale === 'zh' ? '更换图片' : 'Upload New'}
+                          </button>
+                        </div>
+                        {imageAnalyzing && (
+                          <div className="absolute inset-0 bg-background/50 flex flex-col items-center justify-center backdrop-blur-sm">
+                            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                            <span className="mt-3 text-sm font-semibold tracking-wide text-foreground">{locale === 'zh' ? '正在深度解析...' : 'Analyzing...'}</span>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center border-2 border-dashed border-input rounded-lg p-6 bg-muted/5 min-h-[150px]">
+                        <button
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={!currentUser || !canUseAISearch || imageAnalyzing}
+                          className="flex flex-col items-center gap-3 text-muted-foreground hover:text-primary transition-colors disabled:opacity-50 disabled:pointer-events-none w-full h-full"
+                        >
+                          <ImagePlus className="h-8 w-8" />
+                          <span className="text-sm font-medium">{locale === 'zh' ? '点击或粘贴上传试题图片' : 'Upload or paste exam image'}</span>
+                        </button>
+                      </div>
+                    )}
+                    
+                    {imageParseResult && (
+                      <div className="space-y-2 mt-4">
+                        <h3 className="text-sm font-medium text-muted-foreground px-1">{locale === 'zh' ? '参考答案' : 'Reference Answer'}</h3>
+                        <div className="p-5 rounded-xl border bg-card text-card-foreground shadow-sm">
+                          <div className="text-sm leading-relaxed whitespace-pre-wrap text-foreground/80">
+                            {imageParseResult.questionAnalysis}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </motion.div>
                 ) : (
                   <div className="text-center py-20 px-4 text-muted-foreground italic text-sm">
                     {t('clickNode')}
@@ -1261,6 +1427,7 @@ export default function Home() {
                 relationFilters={graphRelationFilters}
                 labelVisibility={labelVisibility}
                 refreshKey={graphKey}
+                staticData={activeTab === 'image-analysis' && imageParseResult ? { nodes: imageParseResult.nodes, links: imageParseResult.links } : undefined}
                 onExpand={(term) => performSearch(term)}
                 onShowDetails={handleHoverDetail}
                 onFocusNode={(term) => void handleGraphNodeFocus(term)}

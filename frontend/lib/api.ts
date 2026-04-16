@@ -55,6 +55,12 @@ export interface GraphData {
   links: GraphLink[];
 }
 
+export interface ImageParseResponse {
+  questionAnalysis: string;
+  nodes: GraphNode[];
+  links: GraphLink[];
+}
+
 export type GraphQueryMode = 'overview' | 'focus';
 export type GraphRelationLabel = 'SYNONYM' | 'ANTONYM' | 'RELATED' | 'ANALOGY';
 
@@ -267,6 +273,20 @@ export const analyzeIdiom = async (text: string): Promise<IdiomResult> => {
       body: JSON.stringify({ text }),
     },
     'Failed to analyze idiom',
+    { requireAuth: true, includeJsonContentType: true },
+  );
+
+  return response.json();
+};
+
+export const analyzeImage = async (image: string): Promise<ImageParseResponse> => {
+  const response = await request(
+    '/analyze/image',
+    {
+      method: 'POST',
+      body: JSON.stringify({ image }),
+    },
+    'Failed to analyze image',
     { requireAuth: true, includeJsonContentType: true },
   );
 

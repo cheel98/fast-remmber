@@ -33,6 +33,7 @@ interface IdiomGraphProps {
   relationFilters: GraphRelationLabel[];
   labelVisibility: GraphLabelVisibility;
   refreshKey?: number;
+  staticData?: GraphData;
 }
 
 const GRAPH_LAYOUT = {
@@ -84,6 +85,7 @@ export default function IdiomGraph({
   relationFilters,
   labelVisibility,
   refreshKey = 0,
+  staticData,
 }: IdiomGraphProps) {
   const t = useTranslations('IdiomGraph');
   const locale = useLocale();
@@ -137,6 +139,13 @@ export default function IdiomGraph({
   }, [data.nodes]);
 
   const loadGraphData = useCallback(async () => {
+    if (staticData) {
+      setData(staticData);
+      setLoading(false);
+      setGraphError(null);
+      return;
+    }
+
     if (!isAuthenticated) {
       setData({ nodes: [], links: [] });
       setLoading(false);
@@ -157,6 +166,7 @@ export default function IdiomGraph({
       setLoading(false);
     }
   }, [
+    staticData,
     activeFetchOptions.center,
     activeFetchOptions.depth,
     activeFetchOptions.limit,

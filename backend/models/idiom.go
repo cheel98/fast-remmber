@@ -69,3 +69,13 @@ type DissociateRequest struct {
 	Target string `json:"target" binding:"required"`
 	Label  string `json:"label" binding:"required"`
 }
+
+type ImageParseRequest struct {
+	ImageBase64 string `json:"image" binding:"required"`
+}
+
+type ImageParseResponse struct {
+	QuestionAnalysis string      `json:"questionAnalysis"`
+	Nodes            []GraphNode `json:"nodes"`
+	Links            []GraphLink `json:"links"`
+}

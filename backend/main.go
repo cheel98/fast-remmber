@@ -48,6 +48,7 @@ func main() {
 			protected.GET("/graph", handlers.GetIdiomGraph)
 			protected.GET("/idiom/:name", handlers.GetIdiomDetail)
 			protected.POST("/analyze", handlers.AnalyzeIdiom)
+			protected.POST("/analyze/image", handlers.ParseImage)
 			protected.POST("/save", handlers.SaveIdiom)
 			protected.POST("/associate", handlers.AssociateIdioms)
 			protected.POST("/dissociate", handlers.DissociateIdioms)

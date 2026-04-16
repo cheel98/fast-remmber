@@ -1001,3 +1001,36 @@ func DeleteIdiom(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"status": "success", "message": "Deleted successfully!"})
 }
+
+func ParseImage(c *gin.Context) {
+	user, ok := currentUserFromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var req models.ImageParseRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Uses AI quota mechanism (same as text search).
+	if err := ensureUserCanUseAISearch(c.Request.Context(), user.Username); err != nil {
+		if errors.Is(err, errAISearchBalanceExhausted) {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify AI search balance"})
+		return
+	}
+
+	result, err := services.ExtractIdiomsFromImage(c.Request.Context(), req.ImageBase64)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to extract from image: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+

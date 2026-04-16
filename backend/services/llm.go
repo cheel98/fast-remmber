@@ -260,3 +260,105 @@ func matchesAuthoritativeSourceName(sourceName string) bool {
 
 	return false
 }
+
+func ExtractIdiomsFromImage(ctx context.Context, base64Image string) (*models.ImageParseResponse, error) {
+	apiKey := os.Getenv("LLM_API_KEY")
+	if apiKey == "" {
+		apiKey = os.Getenv("QWEN_API_KEY")
+	}
+	if apiKey == "" {
+		return nil, fmt.Errorf("LLM_API_KEY or QWEN_API_KEY is not set")
+	}
+
+	baseURL := os.Getenv("LLM_BASE_URL")
+	if baseURL == "" {
+		if os.Getenv("QWEN_API_KEY") != "" && os.Getenv("LLM_API_KEY") == "" {
+			baseURL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+		}
+	}
+
+	model := os.Getenv("LLM_VISION_MODEL")
+	if model == "" {
+		model = os.Getenv("LLM_MODEL") // fallback to default
+	}
+
+	config := openai.DefaultConfig(apiKey)
+	if baseURL != "" {
+		config.BaseURL = baseURL
+	}
+
+	client := openai.NewClientWithConfig(config)
+
+	systemPrompt := strings.Join([]string{
+		"你是一个专门解析中文语文考试试题中成语的智能分析引擎。用户提供了一张包含题目及选项的图片。",
+		"请你仔细阅读这张图片：",
+		"1. 提取出图片试题或文本中涉及到的所有成语。",
+		"2. 给出一份“questionAnalysis”（题目解析，简明扼要）。如果图片涉及选择题，请务必在解析段落的最开头以【正确答案：X】的形式明确给出你推断的参考答案选项。",
+		"3. 分析提取的成语间的相互关系，例如 SYNONYM（近义）、ANTONYM（反义）、RELATED（相关）、ANALOGY（类比）或 EASY_TO_CONFUSE（易混淆）。",
+		"",
+		"请以严格的 JSON 格式返回，结构如下：",
+		"{",
+		"  \"questionAnalysis\": \"这是一道关于成语辨析的选择题...\",",
+		"  \"nodes\": [",
+		"    {\"id\": \"成语A\", \"label\": \"成语A\", \"hasMeaning\": true, \"emotion\": \"褒义\"},",
+		"    {\"id\": \"成语B\", \"label\": \"成语B\", \"hasMeaning\": true, \"emotion\": \"中性\"}",
+		"  ],",
+		"  \"links\": [",
+		"    {\"source\": \"成语A\", \"target\": \"成语B\", \"label\": \"EASY_TO_CONFUSE\", \"strength\": 0.8}",
+		"  ]",
+		"}",
+		"",
+		"规则：",
+		"- 严格按照 JSON 格式输出，不要包含任何 markdown 代码块（如 ```json）和其他冗余文字。",
+		"- 如果图片中没有成语，nodes和links返回空数组。",
+		"- strength在0.0到1.0之间。",
+	}, "\n")
+
+	// Ensure the base64 string has the correct prefix
+	dataURI := base64Image
+	if !strings.HasPrefix(base64Image, "data:image") {
+		dataURI = "data:image/jpeg;base64," + base64Image
+	}
+
+	req := openai.ChatCompletionRequest{
+		Model: model,
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleSystem,
+				Content: systemPrompt,
+			},
+			{
+				Role: openai.ChatMessageRoleUser,
+				MultiContent: []openai.ChatMessagePart{
+					{
+						Type: openai.ChatMessagePartTypeImageURL,
+						ImageURL: &openai.ChatMessageImageURL{
+							URL: dataURI,
+						},
+					},
+				},
+			},
+		},
+		ResponseFormat: &openai.ChatCompletionResponseFormat{
+			Type: openai.ChatCompletionResponseFormatTypeJSONObject,
+		},
+	}
+
+	resp, err := client.CreateChatCompletion(ctx, req)
+	if err != nil {
+		log.Printf("Vision LLM Error: %v", err)
+		return nil, err
+	}
+
+	rawContent := resp.Choices[0].Message.Content
+	log.Printf("Vision LLM Raw Response: %s", rawContent)
+
+	var result models.ImageParseResponse
+	err = json.Unmarshal([]byte(rawContent), &result)
+	if err != nil {
+		log.Printf("Vision JSON Unmarshal Error: %v | Content: %s", err, rawContent)
+		return nil, fmt.Errorf("failed to parse vision JSON from LLM: %v", err)
+	}
+
+	return &result, nil
+}
