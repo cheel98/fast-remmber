@@ -428,10 +428,11 @@ func fetchOverviewNodes(ctx context.Context, tx neo4j.ManagedTransaction, owner 
 		 WITH n, count(r1) AS outDegree
 		 OPTIONAL MATCH (:UserIdiom {owner: $owner})-[r2]->(n)
 		 WHERE type(r2) IN $labels
+		 WITH n, outDegree, count(r2) AS inDegree
 		 RETURN n.name AS name,
 		        n.emotions AS emotion,
 		        n.meaning IS NOT NULL AS explained,
-		        outDegree + count(r2) AS degree
+		        outDegree + inDegree AS degree
 		 ORDER BY degree DESC, name ASC
 		 LIMIT $limit`,
 		map[string]any{
